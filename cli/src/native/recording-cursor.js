@@ -1,5 +1,11 @@
 (() => {
   globalThis.__agentBrowserRecordingCursorCleanup?.();
+  const config = globalThis.__agentBrowserRecordingCursorConfig || {};
+  const size = Math.max(1, Number(config.size) || 28);
+  const width = Math.max(1, Number(config.width) || size);
+  const height = Math.max(1, Number(config.height) || size);
+  const hotspotX = Math.max(0, Number(config.hotspotX) || 0);
+  const hotspotY = Math.max(0, Number(config.hotspotY) || 0);
   let host, pointer, shadow;
   const removers = [];
   let disposed = false;
@@ -15,12 +21,22 @@
     shadow.innerHTML = `<style>
       :host, * { pointer-events: none !important; }
       .pointer { position: fixed; top: 0; left: 0; display: none; }
-      svg { display: block; width: 28px; height: 28px; overflow: visible; transform-origin: 0 0; filter: drop-shadow(0 1px 1px #0008); }
-      .pressed svg { transform: scale(.8); }
+      svg, .cursor-image { display: block; width: ${width}px; height: ${height}px; overflow: visible; transform-origin: ${hotspotX}px ${hotspotY}px; filter: drop-shadow(0 1px 1px #0008); }
+      .cursor-image { object-fit: fill; }
+      .pressed svg, .pressed .cursor-image { transform: scale(.8); }
       .ripple { position: fixed; width: 64px; height: 64px; margin: -32px; border-radius: 50%; border: 2px solid #60a5fa; background: #60a5fa80; box-sizing: border-box; animation: ripple .4s linear forwards; }
       @keyframes ripple { from { transform: scale(0); opacity: .8; } to { transform: scale(1); opacity: 0; } }
-    </style><div class="pointer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M0 0L14 8.5L7.5 10L4 16Z" fill="white" stroke="black" stroke-width="1.5" stroke-linejoin="round"/></svg></div>`;
+    </style><div class="pointer"></div>`;
     pointer = shadow.querySelector('.pointer');
+    if (config.imageDataUrl) {
+      const image = document.createElement('img');
+      image.className = 'cursor-image';
+      image.alt = '';
+      image.src = config.imageDataUrl;
+      pointer.appendChild(image);
+    } else {
+      pointer.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M0 0L14 8.5L7.5 10L4 16Z" fill="white" stroke="black" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+    }
     document.documentElement.appendChild(host);
   }
 
@@ -29,7 +45,7 @@
     mount();
     if (!pointer) return;
     pointer.style.display = 'block';
-    pointer.style.transform = `translate3d(${event.clientX}px,${event.clientY}px,0)`;
+    pointer.style.transform = `translate3d(${event.clientX - hotspotX}px,${event.clientY - hotspotY}px,0)`;
     pointer.classList.toggle('pressed', event.buttons !== 0);
     if (event.type === 'pointerdown') {
       const ripple = document.createElement('div');

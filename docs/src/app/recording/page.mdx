@@ -49,6 +49,12 @@ Chrome recordings do not normally include the native pointer. Add `--cursor` for
 agent-browser record start ./walkthrough.webm --cursor
 ```
 
+For a larger presentation pointer, set one SVG icon for the recording. `--cursor-hotspot x,y` anchors the arrow tip in the SVG's unscaled viewBox, and `--cursor-scale` enlarges both the icon and that hotspot without an OS cursor limit:
+
+```bash
+agent-browser record start ./walkthrough.webm --cursor-icon ./large-arrow.svg --cursor-scale 2 --cursor-hotspot 4,3
+```
+
 ## Contact sheets
 
 Add `--contact-sheet` for a timestamped PNG with highlighted changes.
@@ -98,9 +104,9 @@ Valid rates are 1 to 60. The latest Chrome frame is held between repaints so the
     <tr><th>Command</th><th>Description</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>record start &lt;path.webm|path.mp4&gt; [url] [--fps &lt;n&gt;] [--cursor] [--contact-sheet]</code></td><td>Start recording the active page; a URL navigates the active tab first</td></tr>
+    <tr><td><code>record start &lt;path.webm|path.mp4&gt; [url] [--fps &lt;n&gt;] [--cursor] [--cursor-icon &lt;svg&gt;] [--cursor-scale &lt;factor&gt;] [--cursor-hotspot &lt;x,y&gt;] [--contact-sheet]</code></td><td>Start recording the active page; a URL navigates the active tab first</td></tr>
     <tr><td><code>record stop</code></td><td>Stop the active recording and save the file</td></tr>
-    <tr><td><code>record restart &lt;path.webm|path.mp4&gt; [url] [--fps &lt;n&gt;] [--cursor] [--contact-sheet]</code></td><td>Stop the current recording and immediately start another</td></tr>
+    <tr><td><code>record restart &lt;path.webm|path.mp4&gt; [url] [--fps &lt;n&gt;] [--cursor] [--cursor-icon &lt;svg&gt;] [--cursor-scale &lt;factor&gt;] [--cursor-hotspot &lt;x,y&gt;] [--contact-sheet]</code></td><td>Stop the current recording and immediately start another</td></tr>
   </tbody>
 </table>
 

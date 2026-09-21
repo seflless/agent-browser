@@ -447,6 +447,7 @@ agent-browser profiler stop [path]    # Stop and save profile (.json)
 agent-browser record start ./demo.webm           # Start video recording at 30 fps (.webm or .mp4; needs ffmpeg on PATH)
 agent-browser record start ./demo.webm --fps 60  # 60 fps for motion-heavy takes (1-60 allowed)
 agent-browser record start ./demo.webm --cursor  # Include an animated pointer
+agent-browser record start ./demo.webm --cursor-icon ./cursor.svg --cursor-scale 2 --cursor-hotspot 4,3 # Large SVG pointer with a precise tip
 agent-browser record start ./demo.webm --contact-sheet # Save a PNG with distinct changed areas
 agent-browser record stop                        # Stop and save the video
 agent-browser record restart ./take2.webm        # Stop the current recording, start a new one
@@ -468,6 +469,8 @@ agent-browser state clean --older-than <days>  # Delete old states
 ```
 
 With recording `--cursor`, the pointer and click ripple render with the page, keeping drags synchronized in every captured frame. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it.
+
+For a legible presentation cursor, pass `--cursor-icon` with a local SVG. Use `--cursor-hotspot x,y` to anchor its tip in the SVG's unscaled viewBox; `--cursor-scale` enlarges both the icon and hotspot without any operating-system cursor limit.
 
 ### Navigation
 

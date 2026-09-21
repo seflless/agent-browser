@@ -2918,9 +2918,9 @@ The output file can be viewed in:
             r##"
 agent-browser record - Record browser session to video
 
-Usage: agent-browser record start <path.webm|path.mp4> [url] [--fps <n>] [--cursor] [--contact-sheet]
+Usage: agent-browser record start <path.webm|path.mp4> [url] [--fps <n>] [--cursor] [--cursor-icon <path>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet]
        agent-browser record stop
-       agent-browser record restart <path.webm|path.mp4> [url] [--fps <n>] [--cursor] [--contact-sheet]
+       agent-browser record restart <path.webm|path.mp4> [url] [--fps <n>] [--cursor] [--cursor-icon <path>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet]
 
 Record the browser to a video file. Supported formats are .webm (VP8 via
 libvpx) and .mp4 (H.264 via libx264); any other extension is handed to
@@ -2941,6 +2941,11 @@ work); lower it for long sessions where file size matters more than motion.
 With --cursor, an inert overlay renders the pointer and page together so
 drags stay synchronized. It is hidden from accessibility snapshots and
 removed on stop. Screenshots taken while recording include the overlay.
+Use --cursor-icon with a local SVG to replace the built-in pointer. SVGs stay
+crisp at recording size and do not depend on the OS cursor limit. Use
+--cursor-hotspot x,y to keep its tip on the real click point; coordinates are
+measured in the SVG's unscaled viewBox. --cursor-scale enlarges both the icon
+and its hotspot. Any cursor-icon option enables the recording cursor.
 
 Operations:
   start <path> [url]     Start recording the active page (navigates first if url given)
@@ -2950,6 +2955,9 @@ Operations:
 Options:
   --fps <n>                       Capture rate, 1-60 (default: 30)
   --cursor                        Show an animated pointer
+  --cursor-icon <path>            Use a local SVG cursor icon
+  --cursor-scale <factor>         Scale the SVG (above 0 through 16, default: 1)
+  --cursor-hotspot <x,y>          Pointer tip in unscaled SVG coordinates (default: 0,0)
   --contact-sheet                 Save distinct visual changes as a timestamped PNG
   --contact-sheet-threshold <n>   Changed-pixel ratio, 0-1 (default: 0.05)
 
@@ -2980,6 +2988,9 @@ Examples:
 
   # Export a visual summary beside the video
   agent-browser record start ./demo.webm --cursor --contact-sheet
+
+  # Make a large custom SVG cursor for a legible walkthrough
+  agent-browser record start ./demo.webm --cursor-icon ./cursor.svg --cursor-scale 2 --cursor-hotspot 4,3
 
   # Restart recording with a new file (stops previous, starts new)
   agent-browser record restart ./take2.webm

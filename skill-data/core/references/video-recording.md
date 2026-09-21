@@ -98,6 +98,12 @@ Chrome's screencast does not include the native pointer. Pass `--cursor` to add 
 agent-browser record start ./walkthrough.webm --cursor
 ```
 
+For an oversized, crisp presentation pointer, use one SVG icon for the entire take. `--cursor-hotspot x,y` is the arrow tip in the SVG's unscaled viewBox, so the visible tip remains on the real click point even after scaling:
+
+```bash
+agent-browser record start ./walkthrough.webm --cursor-icon ./large-arrow.svg --cursor-scale 2 --cursor-hotspot 4,3
+```
+
 ## Contact Sheets
 
 Pass `--contact-sheet` to create a timestamped summary with highlighted changes.

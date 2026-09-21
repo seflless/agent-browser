@@ -1382,7 +1382,7 @@ fn parity_tools() -> Vec<Value> {
         tool(
             TOOL_RECORD_START,
             "Record start",
-            "Start video recording of the current active page. Captures 30 fps by default; pass fps up to 60 for motion-heavy takes. Pass url to navigate the active tab there first. Use agent_browser_tab_new beforehand to record in a separate tab.",
+            "Start video recording of the current active page. Captures 30 fps by default; pass fps up to 60 for motion-heavy takes. A large SVG icon and its hotspot can make the synthetic pointer more legible than the OS cursor. Pass url to navigate the active tab there first. Use agent_browser_tab_new beforehand to record in a separate tab.",
             json!({
                 "path": {
                     "type": "string",
@@ -1396,6 +1396,9 @@ fn parity_tools() -> Vec<Value> {
                     "description": "Capture rate in frames per second (default 30, max 60).",
                 },
                 "cursor": { "type": "boolean", "description": "Render a pointer and click ripple with the page so drags stay synchronized. The inert overlay is hidden from accessibility snapshots, included in screenshots while recording, and removed on stop." },
+                "cursorIcon": { "type": "string", "description": "Local SVG icon for the synthetic recording pointer. Implies cursor." },
+                "cursorScale": { "type": "number", "exclusiveMinimum": 0, "maximum": crate::native::recording::MAX_CURSOR_SCALE, "description": "Scale applied to the icon's intrinsic SVG size (default 1). Implies cursor." },
+                "cursorHotspot": { "type": "array", "items": { "type": "number", "minimum": 0 }, "minItems": 2, "maxItems": 2, "description": "[x, y] pointer location in unscaled SVG coordinates. Defaults to [0, 0] and scales with cursorScale." },
                 "contactSheet": { "type": "boolean", "description": "Export first, changed, and final frames as a timestamped PNG beside the video." },
                 "contactSheetThreshold": { "type": "number", "minimum": 0, "maximum": 1, "description": "Changed-pixel ratio required to select a contact-sheet frame (default 0.05). Implies contactSheet." },
             }),
@@ -1425,6 +1428,9 @@ fn parity_tools() -> Vec<Value> {
                     "description": "Capture rate in frames per second (default 30, max 60).",
                 },
                 "cursor": { "type": "boolean", "description": "Render a pointer and click ripple with the page so drags stay synchronized. The inert overlay is hidden from accessibility snapshots, included in screenshots while recording, and removed on stop." },
+                "cursorIcon": { "type": "string", "description": "Local SVG icon for the synthetic recording pointer. Implies cursor." },
+                "cursorScale": { "type": "number", "exclusiveMinimum": 0, "maximum": crate::native::recording::MAX_CURSOR_SCALE, "description": "Scale applied to the icon's intrinsic SVG size (default 1). Implies cursor." },
+                "cursorHotspot": { "type": "array", "items": { "type": "number", "minimum": 0 }, "minItems": 2, "maxItems": 2, "description": "[x, y] pointer location in unscaled SVG coordinates. Defaults to [0, 0] and scales with cursorScale." },
                 "contactSheet": { "type": "boolean", "description": "Export first, changed, and final frames as a timestamped PNG beside the video." },
                 "contactSheetThreshold": { "type": "number", "minimum": 0, "maximum": 1, "description": "Changed-pixel ratio required to select a contact-sheet frame (default 0.05). Implies contactSheet." },
             }),
@@ -3178,6 +3184,36 @@ fn record_command_args(arguments: &Value, action: &str) -> Result<Vec<String>, P
     if optional_bool(arguments, "cursor")?.unwrap_or(false) {
         args.push("--cursor".to_string());
     }
+    if let Some(cursor_icon) = optional_string(arguments, "cursorIcon")? {
+        args.push("--cursor-icon".to_string());
+        args.push(cursor_icon);
+    }
+    if let Some(cursor_scale) = optional_number_string(arguments, "cursorScale")? {
+        args.push("--cursor-scale".to_string());
+        args.push(cursor_scale);
+    }
+    if let Some(hotspot) = arguments.get("cursorHotspot") {
+        let values = hotspot
+            .as_array()
+            .filter(|values| values.len() == 2)
+            .ok_or_else(|| ProtocolError::invalid_params("cursorHotspot must be [x, y]"))?;
+        let x = values[0]
+            .as_f64()
+            .ok_or_else(|| ProtocolError::invalid_params("cursorHotspot must be [x, y]"))?;
+        let y = values[1]
+            .as_f64()
+            .ok_or_else(|| ProtocolError::invalid_params("cursorHotspot must be [x, y]"))?;
+        args.push("--cursor-hotspot".to_string());
+        args.push(format!("{x},{y}"));
+    }
+    if let Some(cursor_image) = optional_string(arguments, "cursorImage")? {
+        args.push("--cursor-icon".to_string());
+        args.push(cursor_image);
+    }
+    if let Some(cursor_size) = optional_u64(arguments, "cursorSize")? {
+        args.push("--cursor-size".to_string());
+        args.push(cursor_size.to_string());
+    }
     if optional_bool(arguments, "contactSheet")?.unwrap_or(false) {
         args.push("--contact-sheet".to_string());
     }
@@ -4909,6 +4945,16 @@ mod tests {
                 tool["inputSchema"]["properties"]["cursor"]["type"],
                 "boolean"
             );
+            let cursor_scale = &tool["inputSchema"]["properties"]["cursorScale"];
+            assert_eq!(cursor_scale["type"], "number");
+            assert_eq!(
+                cursor_scale["maximum"],
+                json!(crate::native::recording::MAX_CURSOR_SCALE)
+            );
+            assert_eq!(
+                tool["inputSchema"]["properties"]["cursorHotspot"]["minItems"],
+                json!(2)
+            );
             assert_eq!(
                 tool["inputSchema"]["properties"]["contactSheet"]["type"],
                 "boolean"
@@ -4945,6 +4991,29 @@ mod tests {
         assert_eq!(
             record_command_args(&json!({ "path": "demo.webm", "cursor": true }), "start").unwrap(),
             vec!["record", "start", "demo.webm", "--cursor"]
+        );
+        assert_eq!(
+            record_command_args(
+                &json!({
+                    "path": "demo.webm",
+                    "cursorIcon": "./large-arrow.svg",
+                    "cursorScale": 2,
+                    "cursorHotspot": [4, 3]
+                }),
+                "start"
+            )
+            .unwrap(),
+            vec![
+                "record",
+                "start",
+                "demo.webm",
+                "--cursor-icon",
+                "./large-arrow.svg",
+                "--cursor-scale",
+                "2",
+                "--cursor-hotspot",
+                "4,3"
+            ]
         );
         assert_eq!(
             record_command_args(

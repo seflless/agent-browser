@@ -1146,6 +1146,7 @@ impl DaemonState {
                 &client,
                 &self.recording_state.cursor_overlays,
                 &sessions,
+                &self.recording_state.cursor_style,
             )
             .await
             {
@@ -1165,6 +1166,7 @@ impl DaemonState {
             shared_count.clone(),
             shared_captured.clone(),
             self.recording_state.cursor,
+            self.recording_state.cursor_style.clone(),
             self.recording_state.shared_cursor.clone(),
             self.recording_state.cursor_overlays.clone(),
             self.active_iframe_sessions.iter().cloned().collect(),
@@ -1591,6 +1593,7 @@ impl DaemonState {
                             &browser.client,
                             &self.recording_state.cursor_overlays,
                             &sessions.into_iter().collect::<Vec<_>>(),
+                            &self.recording_state.cursor_style,
                         )
                         .await;
                     }
@@ -7783,6 +7786,48 @@ fn recording_options_from_command(cmd: &Value) -> Result<recording::RecordingOpt
     Ok(recording::RecordingOptions {
         fps: recording_fps_from_command(cmd)?,
         cursor: cmd.get("cursor").and_then(Value::as_bool).unwrap_or(false),
+        cursor_image: cmd
+            .get("cursorIcon")
+            .or_else(|| cmd.get("cursorImage"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        cursor_scale: match cmd.get("cursorScale") {
+            Some(value) => {
+                let scale = value
+                    .as_f64()
+                    .ok_or_else(|| format!("Invalid cursor scale: {} is not a number", value))?;
+                Some(recording::validate_cursor_scale(scale)?)
+            }
+            None => None,
+        },
+        cursor_hotspot: match cmd.get("cursorHotspot") {
+            Some(value) => {
+                let values = value
+                    .as_array()
+                    .filter(|values| values.len() == 2)
+                    .ok_or_else(|| format!("Invalid cursor hotspot: {} must be [x, y]", value))?;
+                let hotspot = recording::CursorHotspot {
+                    x: values[0].as_f64().ok_or_else(|| {
+                        format!("Invalid cursor hotspot: {} must be [x, y]", value)
+                    })?,
+                    y: values[1].as_f64().ok_or_else(|| {
+                        format!("Invalid cursor hotspot: {} must be [x, y]", value)
+                    })?,
+                };
+                Some(recording::validate_cursor_hotspot(hotspot)?)
+            }
+            None => None,
+        },
+        cursor_size: match cmd.get("cursorSize") {
+            Some(value) => {
+                let size = value
+                    .as_u64()
+                    .and_then(|size| u32::try_from(size).ok())
+                    .ok_or_else(|| format!("Invalid cursor size: {} is not an integer", value))?;
+                Some(recording::validate_cursor_size(size)?)
+            }
+            None => None,
+        },
         contact_sheet: cmd
             .get("contactSheet")
             .and_then(Value::as_bool)
