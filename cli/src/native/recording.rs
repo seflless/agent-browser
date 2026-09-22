@@ -23,6 +23,11 @@ pub const DEFAULT_FPS: u32 = 30;
 /// work) where the extra temporal detail is the point.
 pub const MAX_FPS: u32 = 60;
 
+/// Chrome's screencast producer runs at up to 60 fps. Sampling at the output
+/// rate avoids decoding and transporting frames the recording encoder would
+/// discard, which is especially important for 4K Electron captures.
+const CHROME_SCREENCAST_FPS: u32 = 60;
+
 /// Changed-pixel ratio that selects a contact-sheet frame when the caller
 /// does not provide one. Five percent filters minor animation while retaining
 /// meaningful UI transitions.
@@ -64,6 +69,10 @@ const CONTACT_SHEET_BURST_FRAMES: usize = 7;
 /// Rate above which the live encoder uses additional threads.
 const HIGH_FPS_THRESHOLD: u32 = 30;
 const HIGH_FPS_ENCODER_THREADS: &str = "4";
+/// JPEG makes sustained 4K screencasts practical: PNG decoding otherwise
+/// blocks the encoder pipe long enough to make pointer movement appear to
+/// pause. Quality 90 preserves UI text and vector edges cleanly.
+const RECORDING_JPEG_QUALITY: u8 = 70;
 
 /// VideoToolbox keeps high-resolution captures responsive on macOS. Other
 /// platforms keep the portable libx264 path below.
@@ -148,6 +157,10 @@ pub fn validate_fps(fps: u32) -> Result<u32, String> {
 
 fn frame_period(fps: u32) -> Duration {
     Duration::from_micros(1_000_000 / fps.clamp(1, MAX_FPS) as u64)
+}
+
+fn screencast_every_nth_frame(fps: u32) -> u32 {
+    CHROME_SCREENCAST_FPS.div_ceil(fps.clamp(1, MAX_FPS)).max(1)
 }
 
 /// The CDP session a recording attaches to its page target for its screencast.
@@ -1078,7 +1091,7 @@ fn build_ffmpeg_command(output_path: &str, fps: u32, cursor: bool) -> tokio::pro
             "-f",
             "image2pipe",
             "-c:v",
-            if cursor { "ppm" } else { "png" },
+            if cursor { "ppm" } else { "mjpeg" },
             "-framerate",
             &fps.to_string(),
             "-i",
@@ -1859,7 +1872,7 @@ pub fn spawn_recording_task(
             frame_rx,
         ));
 
-        // Chrome does not reliably emit an initial PNG screencast frame for a
+        // Chrome does not reliably emit an initial screencast frame for a
         // static page. Seed both outputs before listening for later repaints.
         let frame = CapturedVideoFrame {
             sequence: 0,
@@ -1878,8 +1891,9 @@ pub fn spawn_recording_task(
                 .send_command(
                     "Page.startScreencast",
                     Some(json!({
-                        "format": "png",
-                        "everyNthFrame": 1,
+                        "format": "jpeg",
+                        "quality": RECORDING_JPEG_QUALITY,
+                        "everyNthFrame": screencast_every_nth_frame(fps),
                     })),
                     Some(&capture_session),
                 )
@@ -1897,6 +1911,7 @@ pub fn spawn_recording_task(
                     frame_tx,
                     contact_tx,
                     &shared_captured,
+                    fps,
                     cancel_rx,
                 )
                 .await
@@ -1990,7 +2005,11 @@ pub async fn capture_initial_image(
     let result = client
         .send_command(
             "Page.captureScreenshot",
-            Some(json!({"format": "png", "fromSurface": true})),
+            Some(json!({
+                "format": "jpeg",
+                "quality": RECORDING_JPEG_QUALITY,
+                "fromSurface": true,
+            })),
             Some(session_id),
         )
         .await
@@ -2011,10 +2030,13 @@ async fn collect_frames(
     frame_tx: mpsc::Sender<CapturedVideoFrame>,
     contact_tx: Option<std::sync::mpsc::SyncSender<CapturedVideoFrame>>,
     shared_captured: &AtomicU64,
+    fps: u32,
     cancel_rx: oneshot::Receiver<()>,
 ) -> Result<(), String> {
     let mut cancel_rx = std::pin::pin!(cancel_rx);
     let started = tokio::time::Instant::now();
+    let frame_interval = Duration::from_secs_f64(1.0 / f64::from(fps));
+    let mut last_emitted_at = started;
     let mut sequence = 1u64;
 
     loop {
@@ -2023,6 +2045,15 @@ async fn collect_frames(
             event = events.recv() => {
                 let Some(event) = event else { break };
                 if event.method == "Page.screencastFrame" {
+                    // A screencast frame is held by Chromium until it is
+                    // acknowledged. Pace that acknowledgement instead of
+                    // acknowledging a 60 fps stream and discarding work after
+                    // the fact: this is the back-pressure that keeps CDP and
+                    // the Electron renderer responsive during recording.
+                    let remaining = frame_interval.saturating_sub(last_emitted_at.elapsed());
+                    if !remaining.is_zero() {
+                        tokio::time::sleep(remaining).await;
+                    }
                     if let Some(sid) = event.params.get("sessionId").and_then(Value::as_i64) {
                         let _ = client
                             .send_command_no_wait(
@@ -2049,6 +2080,7 @@ async fn collect_frames(
                             device_height: metadata["deviceHeight"].as_f64().unwrap_or(0.0),
                         };
                         sequence += 1;
+                        last_emitted_at = tokio::time::Instant::now();
                         shared_captured.fetch_add(1, Ordering::Relaxed);
                         frame_tx.try_send(frame.clone()).map_err(|error| match error {
                             mpsc::error::TrySendError::Full(_) => format!(
@@ -3448,6 +3480,13 @@ mod tests {
         assert_eq!(frame_period(60), Duration::from_micros(16_666));
     }
 
+    #[test]
+    fn screencast_sampling_matches_the_recording_rate() {
+        assert_eq!(screencast_every_nth_frame(60), 1);
+        assert_eq!(screencast_every_nth_frame(30), 2);
+        assert_eq!(screencast_every_nth_frame(15), 4);
+    }
+
     #[tokio::test]
     async fn test_spawn_ffmpeg_reports_missing_binary() {
         let mut command = tokio::process::Command::new("agent-browser-no-such-ffmpeg");
@@ -3466,7 +3505,7 @@ mod tests {
         assert!(args_str.contains(&"8000k"));
         assert!(args_str.contains(&"18"));
         assert!(args_str.contains(&"image2pipe"));
-        assert!(args_str.contains(&"png"));
+        assert!(args_str.contains(&"mjpeg"));
         assert!(!args_str.contains(&"-use_wallclock_as_timestamps"));
         assert!(args_str.contains(&"vfr"));
     }
