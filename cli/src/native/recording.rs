@@ -65,6 +65,11 @@ const CONTACT_SHEET_BURST_FRAMES: usize = 7;
 const HIGH_FPS_THRESHOLD: u32 = 30;
 const HIGH_FPS_ENCODER_THREADS: &str = "4";
 
+/// VideoToolbox keeps high-resolution captures responsive on macOS. Other
+/// platforms keep the portable libx264 path below.
+#[cfg(target_os = "macos")]
+const MACOS_H264_RECORDING_QUALITY: &str = "70";
+
 /// VP8 budget chosen for readable UI text and thin drawing strokes.
 const WEBM_BITRATE_KBPS: u32 = 8000;
 
@@ -1087,6 +1092,13 @@ fn build_ffmpeg_command(output_path: &str, fps: u32, cursor: bool) -> tokio::pro
             .args(["-b:v", &format!("{}k", WEBM_BITRATE_KBPS)])
             .args(["-deadline", "realtime", "-cpu-used", "4"]);
     } else {
+        // Hardware encoding prevents a 4K capture from competing with the
+        // browser's input and compositing work. VideoToolbox uses a quality
+        // scale instead of libx264's CRF/preset controls.
+        #[cfg(target_os = "macos")]
+        cmd.args(["-c:v", "h264_videotoolbox"])
+            .args(["-q:v", MACOS_H264_RECORDING_QUALITY]);
+        #[cfg(not(target_os = "macos"))]
         cmd.args(["-c:v", "libx264", "-preset", "ultrafast"])
             .args(["-crf", H264_RECORDING_CRF]);
     }
@@ -3464,10 +3476,20 @@ mod tests {
         let cmd = build_ffmpeg_command("/tmp/out.mp4", DEFAULT_FPS, false);
         let args: Vec<&std::ffi::OsStr> = cmd.as_std().get_args().collect();
         let args_str: Vec<&str> = args.iter().filter_map(|a| a.to_str()).collect();
-        assert!(args_str.contains(&"libx264"));
-        assert!(args_str
-            .windows(2)
-            .any(|args| args == ["-crf", H264_RECORDING_CRF]));
+        #[cfg(target_os = "macos")]
+        {
+            assert!(args_str.contains(&"h264_videotoolbox"));
+            assert!(args_str
+                .windows(2)
+                .any(|args| args == ["-q:v", MACOS_H264_RECORDING_QUALITY]));
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert!(args_str.contains(&"libx264"));
+            assert!(args_str
+                .windows(2)
+                .any(|args| args == ["-crf", H264_RECORDING_CRF]));
+        }
         assert!(args_str.contains(&"/tmp/out.mp4"));
     }
 

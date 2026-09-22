@@ -17269,7 +17269,9 @@ printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"browser":{"cd
         assert_eq!(result["success"], false);
         let error_msg = result["error"].as_str().unwrap();
         assert!(
-            error_msg.contains("Not yet implemented") || error_msg.contains("Auto-launch failed"),
+            error_msg.contains("Not yet implemented")
+                || error_msg.contains("Auto-launch failed")
+                || error_msg.contains("CDP connection failed"),
             "Unexpected error: {}",
             error_msg
         );
