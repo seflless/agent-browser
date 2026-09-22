@@ -13164,7 +13164,10 @@ fn interpolated_mouse_steps(
         .unwrap_or_else(|| {
             let spatial_steps = ((distance / 12.0).ceil() as usize).clamp(1, 60);
             if human && duration_ms > 0 {
-                spatial_steps.max(duration_ms.div_ceil(16) as usize)
+                // Sample at 120 Hz. Recording at 60 fps can then interpolate
+                // between two real pointer positions instead of displaying a
+                // one-event-per-frame staircase.
+                spatial_steps.max(duration_ms.div_ceil(8) as usize)
             } else {
                 spatial_steps
             }
@@ -15408,7 +15411,7 @@ printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"data":{}}'
 
     #[test]
     fn human_mouse_path_samples_short_moves_at_animation_cadence() {
-        assert_eq!(interpolated_mouse_steps(10.0, 260, None, true), 17);
+        assert_eq!(interpolated_mouse_steps(10.0, 260, None, true), 33);
         assert_eq!(interpolated_mouse_steps(10.0, 260, None, false), 1);
         assert_eq!(interpolated_mouse_steps(10.0, 100, Some(3), true), 3);
     }
