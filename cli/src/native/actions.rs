@@ -68,6 +68,10 @@ const AUTH_LOGIN_PREFERRED_SELECTOR_WINDOW_MS: u64 = 5_000;
 /// dismisses a menu or changes the page.
 const RECORDING_CURSOR_PRESS_DURATION: Duration = Duration::from_millis(67);
 
+/// Pause briefly at a human click target. This makes recorded interactions
+/// readable and avoids the mechanical move-and-click-on-the-same-frame look.
+const HUMAN_CLICK_TARGET_SETTLE_DURATION: Duration = Duration::from_millis(120);
+
 const AUTH_LOGIN_NO_NAVIGATE_PAGE_ERROR: &str = "auth login --no-navigate requires an existing active HTTP(S) browser page; open the login page first";
 
 pub struct PendingConfirmation {
@@ -6091,6 +6095,7 @@ async fn handle_click(cmd: &Value, state: &mut DaemonState) -> Result<Value, Str
         .get("inputMode")
         .and_then(Value::as_str)
         .unwrap_or(&state.input_mode);
+    let mut human_click_target = None;
     if input_mode != "instant" {
         let (x, y, target_session_id) = super::element::resolve_element_center(
             &mgr.client,
@@ -6122,6 +6127,11 @@ async fn handle_click(cmd: &Value, state: &mut DaemonState) -> Result<Value, Str
             &state.recording_state.shared_cursor,
         )
         .await?;
+        human_click_target = Some((x, y, target_session_id, offset));
+    }
+
+    if input_mode == "human" {
+        tokio::time::sleep(HUMAN_CLICK_TARGET_SETTLE_DURATION).await;
     }
 
     let press_delay = if state.recording_state.cursor {
@@ -6129,19 +6139,33 @@ async fn handle_click(cmd: &Value, state: &mut DaemonState) -> Result<Value, Str
     } else {
         Duration::ZERO
     };
-    let result = interaction::click_with_options(
-        &mgr.client,
-        &session_id,
-        &state.ref_map,
-        selector,
-        &state.iframe_sessions,
-        interaction::ClickOptions {
-            button,
-            click_count,
-            press_delay,
-        },
-    )
-    .await?;
+    let click_options = interaction::ClickOptions {
+        button,
+        click_count,
+        press_delay,
+    };
+    let result = if let Some((x, y, target_session_id, offset)) = human_click_target {
+        interaction::click_at_with_options(
+            &mgr.client,
+            &session_id,
+            &target_session_id,
+            x,
+            y,
+            offset,
+            click_options,
+        )
+        .await?
+    } else {
+        interaction::click_with_options(
+            &mgr.client,
+            &session_id,
+            &state.ref_map,
+            selector,
+            &state.iframe_sessions,
+            click_options,
+        )
+        .await?
+    };
     record_click_animation(
         &result,
         &mut state.mouse_state,
@@ -13064,7 +13088,7 @@ async fn move_mouse_interpolated(
     let dy = target_y - start_y;
     let distance = dx.hypot(dy);
     let duration_ms = if duration_ms == 0 && human {
-        (80.0 + distance * 0.35).clamp(100.0, 700.0) as u64
+        human_mouse_duration_ms(distance)
     } else {
         duration_ms
     };
@@ -13121,6 +13145,13 @@ async fn move_mouse_interpolated(
         }
     }
     Ok(())
+}
+
+/// Human movement has a generous minimum so nearby controls do not look like
+/// the cursor teleported between them. Longer trips scale smoothly without
+/// making a recording drag on indefinitely.
+fn human_mouse_duration_ms(distance: f64) -> u64 {
+    (220.0 + distance * 0.45).clamp(260.0, 900.0) as u64
 }
 
 fn interpolated_mouse_steps(
@@ -15377,9 +15408,16 @@ printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"data":{}}'
 
     #[test]
     fn human_mouse_path_samples_short_moves_at_animation_cadence() {
-        assert_eq!(interpolated_mouse_steps(10.0, 100, None, true), 7);
-        assert_eq!(interpolated_mouse_steps(10.0, 100, None, false), 1);
+        assert_eq!(interpolated_mouse_steps(10.0, 260, None, true), 17);
+        assert_eq!(interpolated_mouse_steps(10.0, 260, None, false), 1);
         assert_eq!(interpolated_mouse_steps(10.0, 100, Some(3), true), 3);
+    }
+
+    #[test]
+    fn human_mouse_duration_keeps_short_moves_readable() {
+        assert_eq!(human_mouse_duration_ms(10.0), 260);
+        assert_eq!(human_mouse_duration_ms(300.0), 355);
+        assert_eq!(human_mouse_duration_ms(2_000.0), 900);
     }
 
     #[tokio::test]

@@ -90,17 +90,43 @@ pub async fn click_with_options(
     // other session belongs to a background tab and must not abort this click.
     let offset =
         session_viewport_offset(client, session_id, &effective_session_id, iframe_sessions).await?;
+    click_at_with_options(
+        client,
+        session_id,
+        &effective_session_id,
+        x,
+        y,
+        offset,
+        options,
+    )
+    .await
+}
+
+/// Dispatch a click at an already-resolved coordinate.
+///
+/// The human cursor path resolves its target before it starts moving. Reusing
+/// that exact coordinate for the press keeps the visible cursor, click ripple,
+/// and actual browser event aligned even when a hover style changes layout.
+pub async fn click_at_with_options(
+    client: &CdpClient,
+    page_session_id: &str,
+    target_session_id: &str,
+    x: f64,
+    y: f64,
+    viewport_offset: (f64, f64),
+    options: ClickOptions<'_>,
+) -> Result<ClickResult, String> {
     let mut result = dispatch_click(
         client,
-        &effective_session_id,
-        &[effective_session_id.as_str(), session_id],
+        target_session_id,
+        &[target_session_id, page_session_id],
         x,
         y,
         options,
     )
     .await?;
     // Compute before dispatch: a click may navigate or open a blocking dialog.
-    result.position = (x + offset.0, y + offset.1);
+    result.position = (x + viewport_offset.0, y + viewport_offset.1);
     (result.x, result.y) = result.position;
     Ok(result)
 }
