@@ -1,0 +1,37 @@
+cli/src/native/recording-cursor.js
+  s_408157d782cb56::t_fff28bffa6b66e 69-71
+  s_408157d782cb56::t_6d0d90353a5c12 10-12,15-30,39-43,45,48-59,64-66,68,74-109,113,126-128,136-137,142,144,147,154
+cli/src/mcp.rs
+  s_408157d782cb56::t_1979f1c79c4887 1385
+README.md
+  s_408157d782cb56::t_1979f1c79c4887 471
+cli/src/output.rs
+  s_408157d782cb56::t_1979f1c79c4887 2944-2945
+skill-data/core/references/video-recording.md
+  s_408157d782cb56::t_7d8b654c095dad 97
+  s_408157d782cb56::t_1979f1c79c4887 95
+  s_408157d782cb56::t_3628b86735e48a 96
+cli/src/native/e2e_tests.rs
+  s_408157d782cb56::t_83af08c96811c1 9192-9216,9236-9238,9244-9245
+  s_408157d782cb56::t_813b851aab45f1 9217-9235,9239-9243
+docs/src/app/recording/page.mdx
+  s_408157d782cb56::t_1979f1c79c4887 46
+cli/src/native/recording.rs
+  s_408157d782cb56::t_1979f1c79c4887 550-551
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "540cfcab6819896b42c71f0f29b876e3eba77de6",
+  "prompts": {},
+  "sessions": {
+    "s_408157d782cb56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c0d0-c86b-7383-9571-52c6e63302a7",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Francois Laberge <francoislaberge@gmail.com>"
+    }
+  }
+}
