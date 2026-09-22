@@ -92,7 +92,9 @@ The video uses the requested frame rate and holds the latest Chrome frame betwee
 
 ## Visible Cursor
 
-Chrome's screencast does not include the native pointer. Pass `--cursor` to add an animated pointer and click ripple rendered with the page, keeping drags synchronized in every captured frame. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it.
+Chrome's screencast does not include the native pointer. Pass `--cursor` to add an animated pointer and click ripple rendered with the page, keeping drags synchronized in every captured frame. A device-pixel-ratio-aware canvas keeps the capture damage region stable after drags, avoiding Chromium's cursor-only capture stalls. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it. Validate motion in decoded frames: output FPS metadata alone does not prove that Chrome supplied distinct frames at that rate.
+
+For native Retina recording, launch a fresh Chrome session with `--args '--force-device-scale-factor=2'`, then use `set viewport 1280 800 2` for a 1280×800 logical viewport and 2560×1600 source frames. Emulated DPR alone can leave the actual screencast surface at 1280×800 even though the initial screenshot and encoded output are 2560×1600. Verify raw screencast dimensions rather than inferring source detail from the video container.
 
 ```bash
 agent-browser record start ./walkthrough.webm --cursor

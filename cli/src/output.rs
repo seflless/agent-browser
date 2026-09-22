@@ -2941,6 +2941,8 @@ work); lower it for long sessions where file size matters more than motion.
 With --cursor, an inert overlay renders the pointer and page together so
 drags stay synchronized. It is hidden from accessibility snapshots and
 removed on stop. Screenshots taken while recording include the overlay.
+The DPR-aware canvas avoids cursor-only capture stalls after drags. Requested
+FPS is an output target, not a guarantee of distinct frames from Chrome.
 Use --cursor-icon with a local SVG to replace the built-in pointer. SVGs stay
 crisp at recording size and do not depend on the OS cursor limit. Use
 --cursor-hotspot x,y to keep its tip on the real click point; coordinates are

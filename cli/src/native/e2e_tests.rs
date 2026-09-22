@@ -9189,6 +9189,60 @@ async fn e2e_recording_cursor_moves_after_release_without_repaint() {
     );
 }
 
+/// Exercise Chromium's animation-region lock-in, not just the final cursor pixel.
+/// A long full-page repaint followed by cursor-only movement used to produce
+/// 100-267 ms frozen runs even while pointer events and requestAnimationFrame ran.
+#[tokio::test]
+#[ignore]
+async fn e2e_recording_cursor_capture_continues_after_large_repaint() {
+    let mut state = DaemonState::new();
+    for command in [
+        json!({"action":"launch","headless":true}),
+        json!({"action":"viewport","width":640,"height":480}),
+        json!({"action":"navigate","url":"data:text/html,<style>body{margin:0;background:%23303030}</style><script>let n=0;document.addEventListener('pointermove',e=>{if(e.buttons)document.body.style.background=(n++%2)?'%23303030':'%23313131'})</script>"}),
+        json!({"action":"mousemove","x":80,"y":240}),
+    ] {
+        assert_success(&execute_command(&command, &mut state).await);
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("capture-cadence.mp4");
+    for command in [
+        json!({"action":"recording_start","path":path,"cursor":true,"fps":60}),
+        json!({"action":"mousedown"}),
+        json!({"action":"mousemove","x":560,"y":240,"duration":1600,"steps":96}),
+        json!({"action":"mouseup"}),
+    ] {
+        assert_success(&execute_command(&command, &mut state).await);
+    }
+    let start = state
+        .recording_state
+        .shared_captured_count
+        .as_ref()
+        .unwrap()
+        .load(Ordering::Relaxed);
+    assert_success(
+        &execute_command(
+            &json!({"action":"mousemove","x":80,"y":240,"duration":1000,"steps":60}),
+            &mut state,
+        )
+        .await,
+    );
+    let end = state
+        .recording_state
+        .shared_captured_count
+        .as_ref()
+        .unwrap()
+        .load(Ordering::Relaxed);
+    assert_success(&execute_command(&json!({"action":"recording_stop"}), &mut state).await);
+    assert_success(&execute_command(&json!({"action":"close"}), &mut state).await);
+    // Count real captured frames, not the encoder's repeated 60 fps output.
+    assert!(
+        end - start >= 45,
+        "cursor-only return captured only {} frames",
+        end - start
+    );
+}
+
 #[tokio::test]
 #[ignore]
 async fn e2e_initial_recording_frame_uses_css_viewport_dimensions() {

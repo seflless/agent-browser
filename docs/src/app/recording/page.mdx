@@ -43,7 +43,7 @@ agent-browser record start ./demo.webm
 
 ## Visible cursor
 
-Chrome recordings do not normally include the native pointer. Add `--cursor` for an animated pointer and click ripple rendered with the page, keeping drags synchronized in every captured frame. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it:
+Chrome recordings do not normally include the native pointer. Add `--cursor` for an animated pointer and click ripple rendered with the page, keeping drags synchronized in every captured frame. A device-pixel-ratio-aware canvas keeps the capture damage region stable after drags, avoiding Chromium's cursor-only capture stalls. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it. The requested FPS is an output target; encoded FPS metadata does not guarantee that Chrome supplied that many distinct frames:
 
 ```bash
 agent-browser record start ./walkthrough.webm --cursor

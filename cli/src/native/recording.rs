@@ -547,6 +547,8 @@ const CURSOR_OVERLAY_SCRIPT: &str = include_str!("recording-cursor.js");
 /// Paint recording feedback with the page so drags share the same compositor
 /// frame. An isolated world and a closed shadow root keep it out of page scripts
 /// and styles; the host is inert and absent from accessibility snapshots.
+/// A DPR-aware canvas keeps the damage region stable so Chromium's animated
+/// content sampler does not suppress cursor-only frames after a canvas drag.
 pub struct CursorOverlay {
     script_id: String,
     world_name: String,

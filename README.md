@@ -468,7 +468,7 @@ agent-browser state clear --all       # Clear all saved states
 agent-browser state clean --older-than <days>  # Delete old states
 ```
 
-With recording `--cursor`, the pointer and click ripple render with the page, keeping drags synchronized in every captured frame. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it.
+With recording `--cursor`, the pointer and click ripple render with the page, keeping drags synchronized in every captured frame. A device-pixel-ratio-aware canvas keeps the capture damage region stable when the pointer moves away after a drag, avoiding Chromium's cursor-only capture stalls. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it. The requested recording frame rate is an output target, not a guarantee that Chrome supplies that many distinct frames.
 
 For a legible presentation cursor, pass `--cursor-icon` with a local SVG. Use `--cursor-hotspot x,y` to anchor its tip in the SVG's unscaled viewBox; `--cursor-scale` enlarges both the icon and hotspot without any operating-system cursor limit.
 

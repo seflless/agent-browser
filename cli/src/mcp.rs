@@ -1382,7 +1382,7 @@ fn parity_tools() -> Vec<Value> {
         tool(
             TOOL_RECORD_START,
             "Record start",
-            "Start video recording of the current active page. Captures 30 fps by default; pass fps up to 60 for motion-heavy takes. A large SVG icon and its hotspot can make the synthetic pointer more legible than the OS cursor. Pass url to navigate the active tab there first. Use agent_browser_tab_new beforehand to record in a separate tab.",
+            "Start video recording of the current active page. Targets 30 fps by default; pass fps up to 60 for motion-heavy takes. Output FPS does not guarantee distinct frames from Chrome. A large SVG icon and its hotspot can make the synthetic pointer more legible than the OS cursor; a DPR-aware canvas avoids cursor-only capture stalls after drags. Pass url to navigate the active tab there first. Use agent_browser_tab_new beforehand to record in a separate tab.",
             json!({
                 "path": {
                     "type": "string",
