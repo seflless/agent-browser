@@ -1,0 +1,22 @@
+cli/src/native/interaction.rs
+  s_408157d782cb56::t_80ae0169b77ddd 93,95,97-122,129
+cli/src/native/actions.rs
+  s_408157d782cb56::t_80ae0169b77ddd 71-74,6098,6130-6134,6142-6168,13091,13150-13156,15411-15412,15416-15421
+  s_408157d782cb56::t_73c221147663b3 15422
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ced4470040c06b33db0d6cbbcadf4680647a9ea3",
+  "prompts": {},
+  "sessions": {
+    "s_408157d782cb56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c0d0-c86b-7383-9571-52c6e63302a7",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Francois Laberge <francoislaberge@gmail.com>"
+    }
+  }
+}
