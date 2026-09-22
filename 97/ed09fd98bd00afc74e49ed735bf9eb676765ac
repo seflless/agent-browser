@@ -1,0 +1,27 @@
+cli/src/native/recording-cursor.js
+  s_408157d782cb56::t_1de4951ba5eaf7 27-28
+cli/src/native/actions.rs
+  s_408157d782cb56::t_1de4951ba5eaf7 10,67-70
+  s_408157d782cb56::t_e8ce0c01fd25b0 6127-6132,6138-6142
+cli/src/native/recording.rs
+  s_408157d782cb56::t_e77ede8437fb59 71-75,1090-1091,3468-3470
+cli/src/native/interaction.rs
+  s_408157d782cb56::t_e8ce0c01fd25b0 36-44,53-54,60-64,72,78,99,1072,1104,1119,1121,1139,1147-1150,1161,1163
+  s_408157d782cb56::t_1de4951ba5eaf7 2,55-59,65-71,73-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "97ed09fd98bd00afc74e49ed735bf9eb676765ac",
+  "prompts": {},
+  "sessions": {
+    "s_408157d782cb56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c0d0-c86b-7383-9571-52c6e63302a7",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Francois Laberge <francoislaberge@gmail.com>"
+    }
+  }
+}
