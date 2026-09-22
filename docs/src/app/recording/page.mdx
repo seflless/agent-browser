@@ -12,7 +12,7 @@ sudo apt install ffmpeg    # Debian/Ubuntu
 agent-browser doctor       # reports ffmpeg and its encoders under "Recording"
 ```
 
-The supported formats are `.webm` (VP8 via libvpx) and `.mp4` (H.264 via libx264). Any other extension is handed to ffmpeg as-is with H.264 video, so `.mkv` or `.mov` work if ffmpeg knows the container. A path with no extension is rejected before recording starts, since ffmpeg would have nothing to pick a container from. Nothing else in agent-browser needs ffmpeg.
+The supported formats are `.webm` (VP8 via libvpx) and `.mp4` (H.264 via VideoToolbox on macOS, libx264 elsewhere). Any other extension is handed to ffmpeg as-is with H.264 video, so `.mkv` or `.mov` work if ffmpeg knows the container. A path with no extension is rejected before recording starts, since ffmpeg would have nothing to pick a container from. Nothing else in agent-browser needs ffmpeg.
 
 ## Basic workflow
 
@@ -54,6 +54,14 @@ For a larger presentation pointer, set one SVG icon for the recording. `--cursor
 ```bash
 agent-browser record start ./walkthrough.webm --cursor-icon ./large-arrow.svg --cursor-scale 2 --cursor-hotspot 4,3
 ```
+
+## Repeatable product demos
+
+Use an agent to discover and rehearse the UI, then run the take as one deterministic `batch --bail` script. Start capture only after the actual controls are ready; keep authentication, loading, screenshots, and assertions outside the take. Short target and menu settling delays make actions readable without multi-second gaps between commands.
+
+For Retina detail without tiny UI, launch a fresh Chrome session with `--args '--force-device-scale-factor=2'`, then use `set viewport 1280 800 2`. Verify that raw screencast frames are actually 2560×1600: emulated DPR or video-container dimensions alone can hide an upscaled source. Likewise, 60 fps output can contain held frames if Chrome delivers fewer updates.
+
+This fork includes a [recording playbook and deterministic 4×3 palette demo](https://github.com/seflless/agent-browser/tree/feat/custom-recording-cursor/examples/recordings), with a source-resolution probe and postflight assertions. The [capture-stall investigation](https://github.com/seflless/agent-browser/blob/feat/custom-recording-cursor/docs/solutions/performance-issues/cursor-stalls-native-recording-20260922.md) explains why cursor rendering uses a stable canvas surface during capture, rather than moving DOM images or post-processing.
 
 ## Contact sheets
 

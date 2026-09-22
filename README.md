@@ -472,6 +472,8 @@ With recording `--cursor`, the pointer and click ripple render with the page, ke
 
 For a legible presentation cursor, pass `--cursor-icon` with a local SVG. Use `--cursor-hotspot x,y` to anchor its tip in the SVG's unscaled viewBox; `--cursor-scale` enlarges both the icon and hotspot without any operating-system cursor limit.
 
+For repeatable demos, see the [product-recording playbook and deterministic 4×3 color-grid example](examples/recordings/README.md). It covers native Retina capture, pacing, text entry, cursor verification, and the [capture-stall investigation](docs/solutions/performance-issues/cursor-stalls-native-recording-20260922.md).
+
 ### Navigation
 
 ```bash

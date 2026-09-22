@@ -41,6 +41,9 @@ jobs:
       - name: Run launcher tests
         run: pnpm run test:launcher
 
+      - name: Check deterministic recording example
+        run: node --test examples/recordings/decode-color-grid.test.mjs
+
   rust:
     name: Rust
     runs-on: ubuntu-latest

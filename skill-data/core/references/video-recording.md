@@ -21,7 +21,7 @@ Capture browser automation as video for debugging, documentation, or verificatio
 
 Recording pipes frames into `ffmpeg`, which must be on `PATH` with the `libvpx` and `libx264` encoders. Install it with `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Debian/Ubuntu); `agent-browser doctor` reports it under "Recording". Nothing else in agent-browser needs ffmpeg.
 
-Supported formats are `.webm` (VP8 via libvpx) and `.mp4` (H.264 via libx264). Other extensions are handed to ffmpeg as-is with H.264 video. A path with no extension is rejected before recording starts.
+Supported formats are `.webm` (VP8 via libvpx) and `.mp4` (H.264 via VideoToolbox on macOS, libx264 elsewhere). Other extensions are handed to ffmpeg as-is with H.264 video. A path with no extension is rejected before recording starts.
 
 ## Basic Recording
 
@@ -188,6 +188,10 @@ agent-browser record stop
 ```
 
 ## Best Practices
+
+For product demos, discover and rehearse first, then record one deterministic `batch --bail` sequence. Do not run an agent loop between recorded steps. Keep app loading outside the take, wait for the actual controls rather than an early editor hook, use short menu/editor settling delays, and verify the final app state after stopping. Output FPS alone is not a smoothness check: validate raw frame dimensions and review cursor motion after large page updates.
+
+The repository's [repeatable-recording playbook](../../../examples/recordings/README.md) includes a runnable Decode 4×3 palette example, seeded motion, single-paragraph label entry, inherited fill checks, Retina source-frame verification, and a take manifest. See also the [capture-stall postmortem](../../../docs/solutions/performance-issues/cursor-stalls-native-recording-20260922.md).
 
 ### 1. Add Pauses for Clarity
 
