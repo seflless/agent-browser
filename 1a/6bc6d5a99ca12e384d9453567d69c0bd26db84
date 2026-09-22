@@ -1,0 +1,14 @@
+cli/src/native/actions.rs
+  h_0dbcbba47c7061 13167-13170,15414
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1a6bc6d5a99ca12e384d9453567d69c0bd26db84",
+  "prompts": {},
+  "humans": {
+    "h_0dbcbba47c7061": {
+      "author": "Francois Laberge <francoislaberge@gmail.com>"
+    }
+  }
+}
