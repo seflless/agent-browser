@@ -1,0 +1,41 @@
+docs/solutions/performance-issues/cursor-stalls-native-recording-20260922.md
+  s_408157d782cb56::t_cb8064ea82ca4d 1-18,20-81
+  s_408157d782cb56::t_1598b2b2036771 19
+README.md
+  s_408157d782cb56::t_1598b2b2036771 475-476
+examples/recordings/decode-color-grid.mjs
+  s_408157d782cb56::t_0477a2903c947e 1-51,53-69,72-96,107-122,124-181,185-212
+  s_408157d782cb56::t_747b5e6669b270 70-71,97-106,123
+  s_408157d782cb56::t_9ea1744ecebe66 182-184
+  s_408157d782cb56::t_cb8064ea82ca4d 52
+examples/recordings/decode-color-grid.test.mjs
+  s_408157d782cb56::t_747b5e6669b270 39-40
+  s_408157d782cb56::t_cb8064ea82ca4d 1-38,41
+skill-data/core/references/video-recording.md
+  s_408157d782cb56::t_1598b2b2036771 24,192-194
+  s_408157d782cb56::t_ee69b84469dc55 195
+docs/src/app/recording/page.mdx
+  s_408157d782cb56::t_1598b2b2036771 15,58-64
+  s_408157d782cb56::t_6c0d9ab6913425 65
+examples/recordings/README.md
+  s_408157d782cb56::t_9ea1744ecebe66 42
+  s_408157d782cb56::t_cb8064ea82ca4d 1-41,43-93
+.github/workflows/ci.yml
+  s_408157d782cb56::t_747b5e6669b270 44-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5d2d3acfdc1930a5c894451fca54c857a6f0ff9a",
+  "prompts": {},
+  "sessions": {
+    "s_408157d782cb56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c0d0-c86b-7383-9571-52c6e63302a7",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Francois Laberge <francoislaberge@gmail.com>"
+    }
+  }
+}
