@@ -1,0 +1,25 @@
+cli/src/native/recording.rs
+  s_408157d782cb56::t_62e171c2b548bb 72-74,1094,1875,1894-1895,2008-2012,3508
+  s_408157d782cb56::t_eeb73acbf15489 1914,2033,2038-2039,2083
+  s_408157d782cb56::t_6f077f50cfb377 2048-2056
+  s_408157d782cb56::t_640d32ca253ec7 75
+  s_408157d782cb56::t_442c42bbf066b4 26-30,162-163,1896,3483-3487
+  s_408157d782cb56::t_e07481f5781784 164-165
+  s_408157d782cb56::t_6f8748e2cd7688 3488-3489
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "aff39f13c33d9f58b18b60e9b30f1aa9cc711161",
+  "prompts": {},
+  "sessions": {
+    "s_408157d782cb56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c0d0-c86b-7383-9571-52c6e63302a7",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Francois Laberge <francoislaberge@gmail.com>"
+    }
+  }
+}
