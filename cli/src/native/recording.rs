@@ -68,6 +68,11 @@ const HIGH_FPS_ENCODER_THREADS: &str = "4";
 /// VP8 budget chosen for readable UI text and thin drawing strokes.
 const WEBM_BITRATE_KBPS: u32 = 8000;
 
+/// Keep H.264 UI recordings crisp at desktop and retina-sized viewports.
+/// The faster preset trades compression efficiency for real-time encoding, so
+/// a lower CRF is necessary to avoid soft text and cursor edges.
+const H264_RECORDING_CRF: &str = "16";
+
 /// Captured frames may wait briefly for compositing, but overload must fail
 /// the recording instead of silently degrading it into held frames.
 const ENCODER_FRAME_BUFFER: usize = 16;
@@ -1082,7 +1087,8 @@ fn build_ffmpeg_command(output_path: &str, fps: u32, cursor: bool) -> tokio::pro
             .args(["-b:v", &format!("{}k", WEBM_BITRATE_KBPS)])
             .args(["-deadline", "realtime", "-cpu-used", "4"]);
     } else {
-        cmd.args(["-c:v", "libx264", "-preset", "ultrafast"]);
+        cmd.args(["-c:v", "libx264", "-preset", "ultrafast"])
+            .args(["-crf", H264_RECORDING_CRF]);
     }
 
     // One encoder thread keeps CPU away from the browser at ordinary rates;
@@ -3459,6 +3465,9 @@ mod tests {
         let args: Vec<&std::ffi::OsStr> = cmd.as_std().get_args().collect();
         let args_str: Vec<&str> = args.iter().filter_map(|a| a.to_str()).collect();
         assert!(args_str.contains(&"libx264"));
+        assert!(args_str
+            .windows(2)
+            .any(|args| args == ["-crf", H264_RECORDING_CRF]));
         assert!(args_str.contains(&"/tmp/out.mp4"));
     }
 

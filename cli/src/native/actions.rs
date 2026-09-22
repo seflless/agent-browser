@@ -7,6 +7,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Duration;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tokio::sync::{broadcast, oneshot, RwLock};
 
@@ -62,6 +63,10 @@ const AUTH_LOGIN_SELECTOR_POLL_INTERVAL_MS: u64 = 100;
 /// Time spent trying targeted username selectors before broad text-input
 /// fallback selectors are allowed.
 const AUTH_LOGIN_PREFERRED_SELECTOR_WINDOW_MS: u64 = 5_000;
+
+/// A short natural press keeps recording feedback visible before a click
+/// dismisses a menu or changes the page.
+const RECORDING_CURSOR_PRESS_DURATION: Duration = Duration::from_millis(67);
 
 const AUTH_LOGIN_NO_NAVIGATE_PAGE_ERROR: &str = "auth login --no-navigate requires an existing active HTTP(S) browser page; open the login page first";
 
@@ -6119,14 +6124,22 @@ async fn handle_click(cmd: &Value, state: &mut DaemonState) -> Result<Value, Str
         .await?;
     }
 
-    let result = interaction::click(
+    let press_delay = if state.recording_state.cursor {
+        RECORDING_CURSOR_PRESS_DURATION
+    } else {
+        Duration::ZERO
+    };
+    let result = interaction::click_with_options(
         &mgr.client,
         &session_id,
         &state.ref_map,
         selector,
-        button,
-        click_count,
         &state.iframe_sessions,
+        interaction::ClickOptions {
+            button,
+            click_count,
+            press_delay,
+        },
     )
     .await?;
     record_click_animation(

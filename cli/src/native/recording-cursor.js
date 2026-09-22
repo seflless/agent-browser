@@ -24,8 +24,8 @@
       svg, .cursor-image { display: block; width: ${width}px; height: ${height}px; overflow: visible; transform-origin: ${hotspotX}px ${hotspotY}px; filter: drop-shadow(0 1px 1px #0008); }
       .cursor-image { object-fit: fill; }
       .pressed svg, .pressed .cursor-image { transform: scale(.8); }
-      .ripple { position: fixed; width: 64px; height: 64px; margin: -32px; border-radius: 50%; border: 2px solid #60a5fa; background: #60a5fa80; box-sizing: border-box; animation: ripple .4s linear forwards; }
-      @keyframes ripple { from { transform: scale(0); opacity: .8; } to { transform: scale(1); opacity: 0; } }
+      .ripple { position: fixed; width: 16px; height: 16px; margin: -8px; border-radius: 50%; border: 2px solid #60a5fa; background: #60a5fa66; box-sizing: border-box; animation: ripple .18s ease-out forwards; }
+      @keyframes ripple { from { transform: scale(1); opacity: .2; } to { transform: scale(4); opacity: .5; } }
     </style><div class="pointer"></div>`;
     pointer = shadow.querySelector('.pointer');
     if (config.imageDataUrl) {

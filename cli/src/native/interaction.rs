@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use serde_json::Value;
 
@@ -32,6 +33,15 @@ pub struct PendingRelease {
     pub button: String,
 }
 
+/// Input behavior for a coordinate click. The default public click path uses
+/// a zero press delay; recordings can opt into a short natural hold.
+#[derive(Clone, Copy)]
+pub struct ClickOptions<'a> {
+    pub button: &'a str,
+    pub click_count: i32,
+    pub press_delay: Duration,
+}
+
 pub async fn click(
     client: &CdpClient,
     session_id: &str,
@@ -40,6 +50,32 @@ pub async fn click(
     button: &str,
     click_count: i32,
     iframe_sessions: &HashMap<String, String>,
+) -> Result<ClickResult, String> {
+    click_with_options(
+        client,
+        session_id,
+        ref_map,
+        selector_or_ref,
+        iframe_sessions,
+        ClickOptions {
+            button,
+            click_count,
+            press_delay: Duration::ZERO,
+        },
+    )
+    .await
+}
+
+/// Click an element while holding the pointer down briefly before releasing.
+/// Recording uses this to give the click feedback a composited frame while the
+/// clicked UI is still visible; regular automation remains instant.
+pub async fn click_with_options(
+    client: &CdpClient,
+    session_id: &str,
+    ref_map: &RefMap,
+    selector_or_ref: &str,
+    iframe_sessions: &HashMap<String, String>,
+    options: ClickOptions<'_>,
 ) -> Result<ClickResult, String> {
     let (x, y, effective_session_id) = resolve_element_center(
         client,
@@ -60,8 +96,7 @@ pub async fn click(
         &[effective_session_id.as_str(), session_id],
         x,
         y,
-        button,
-        click_count,
+        options,
     )
     .await?;
     // Compute before dispatch: a click may navigate or open a blocking dialog.
@@ -1034,8 +1069,7 @@ async fn dispatch_click(
     accept_sessions: &[&str],
     x: f64,
     y: f64,
-    button: &str,
-    click_count: i32,
+    options: ClickOptions<'_>,
 ) -> Result<ClickResult, String> {
     // Move
     if dispatch_mouse_or_dialog(
@@ -1067,7 +1101,7 @@ async fn dispatch_click(
         });
     }
 
-    let button_value = match button {
+    let button_value = match options.button {
         "right" => 2,
         "middle" => 4,
         _ => 1,
@@ -1082,9 +1116,9 @@ async fn dispatch_click(
             event_type: "mousePressed".to_string(),
             x,
             y,
-            button: Some(button.to_string()),
+            button: Some(options.button.to_string()),
             buttons: Some(button_value),
-            click_count: Some(click_count),
+            click_count: Some(options.click_count),
             delta_x: None,
             delta_y: None,
             modifiers: None,
@@ -1102,12 +1136,16 @@ async fn dispatch_click(
                 session_id: session_id.to_string(),
                 x,
                 y,
-                button: button.to_string(),
+                button: options.button.to_string(),
             }),
             x,
             y,
             button_pressed: true,
         });
+    }
+
+    if !options.press_delay.is_zero() {
+        tokio::time::sleep(options.press_delay).await;
     }
 
     // Release. A dialog here fired from the click/mouseup handler, which runs
@@ -1120,9 +1158,9 @@ async fn dispatch_click(
             event_type: "mouseReleased".to_string(),
             x,
             y,
-            button: Some(button.to_string()),
+            button: Some(options.button.to_string()),
             buttons: Some(0),
-            click_count: Some(click_count),
+            click_count: Some(options.click_count),
             delta_x: None,
             delta_y: None,
             modifiers: None,
