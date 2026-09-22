@@ -1,0 +1,20 @@
+cli/src/native/recording-cursor.js
+  s_408157d782cb56::t_bf3fa973fd683a 9,12-20,32-34,40,42,49,52,57-69,71-89,93,95-106,108-109,129-133,139
+  s_408157d782cb56::t_84f3d1cc3eafaf 70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a91d41104de7a8e18da73039b3463557ea2ac4fd",
+  "prompts": {},
+  "sessions": {
+    "s_408157d782cb56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c0d0-c86b-7383-9571-52c6e63302a7",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Francois Laberge <francoislaberge@gmail.com>"
+    }
+  }
+}
