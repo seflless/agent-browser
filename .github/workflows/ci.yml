@@ -41,6 +41,9 @@ jobs:
       - name: Run launcher tests
         run: pnpm run test:launcher
 
+      - name: Check recording examples and cursor feedback
+        run: node --test examples/recordings/decode-color-grid.test.mjs examples/recordings/cursor-workbench/model.test.mjs test/recording-cursor-feedback.test.mjs
+
   rust:
     name: Rust
     runs-on: ubuntu-latest

@@ -7,6 +7,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Duration;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tokio::sync::{broadcast, oneshot, RwLock};
 
@@ -62,6 +63,14 @@ const AUTH_LOGIN_SELECTOR_POLL_INTERVAL_MS: u64 = 100;
 /// Time spent trying targeted username selectors before broad text-input
 /// fallback selectors are allowed.
 const AUTH_LOGIN_PREFERRED_SELECTOR_WINDOW_MS: u64 = 5_000;
+
+/// A short natural press keeps recording feedback visible before a click
+/// dismisses a menu or changes the page.
+const RECORDING_CURSOR_PRESS_DURATION: Duration = Duration::from_millis(67);
+
+/// Pause briefly at a human click target. This makes recorded interactions
+/// readable and avoids the mechanical move-and-click-on-the-same-frame look.
+const HUMAN_CLICK_TARGET_SETTLE_DURATION: Duration = Duration::from_millis(120);
 
 const AUTH_LOGIN_NO_NAVIGATE_PAGE_ERROR: &str = "auth login --no-navigate requires an existing active HTTP(S) browser page; open the login page first";
 
@@ -1146,6 +1155,7 @@ impl DaemonState {
                 &client,
                 &self.recording_state.cursor_overlays,
                 &sessions,
+                &self.recording_state.cursor_style,
             )
             .await
             {
@@ -1165,6 +1175,7 @@ impl DaemonState {
             shared_count.clone(),
             shared_captured.clone(),
             self.recording_state.cursor,
+            self.recording_state.cursor_style.clone(),
             self.recording_state.shared_cursor.clone(),
             self.recording_state.cursor_overlays.clone(),
             self.active_iframe_sessions.iter().cloned().collect(),
@@ -1591,6 +1602,7 @@ impl DaemonState {
                             &browser.client,
                             &self.recording_state.cursor_overlays,
                             &sessions.into_iter().collect::<Vec<_>>(),
+                            &self.recording_state.cursor_style,
                         )
                         .await;
                     }
@@ -6083,6 +6095,7 @@ async fn handle_click(cmd: &Value, state: &mut DaemonState) -> Result<Value, Str
         .get("inputMode")
         .and_then(Value::as_str)
         .unwrap_or(&state.input_mode);
+    let mut human_click_target = None;
     if input_mode != "instant" {
         let (x, y, target_session_id) = super::element::resolve_element_center(
             &mgr.client,
@@ -6114,18 +6127,45 @@ async fn handle_click(cmd: &Value, state: &mut DaemonState) -> Result<Value, Str
             &state.recording_state.shared_cursor,
         )
         .await?;
+        human_click_target = Some((x, y, target_session_id, offset));
     }
 
-    let result = interaction::click(
-        &mgr.client,
-        &session_id,
-        &state.ref_map,
-        selector,
+    if input_mode == "human" {
+        tokio::time::sleep(HUMAN_CLICK_TARGET_SETTLE_DURATION).await;
+    }
+
+    let press_delay = if state.recording_state.cursor {
+        RECORDING_CURSOR_PRESS_DURATION
+    } else {
+        Duration::ZERO
+    };
+    let click_options = interaction::ClickOptions {
         button,
         click_count,
-        &state.iframe_sessions,
-    )
-    .await?;
+        press_delay,
+    };
+    let result = if let Some((x, y, target_session_id, offset)) = human_click_target {
+        interaction::click_at_with_options(
+            &mgr.client,
+            &session_id,
+            &target_session_id,
+            x,
+            y,
+            offset,
+            click_options,
+        )
+        .await?
+    } else {
+        interaction::click_with_options(
+            &mgr.client,
+            &session_id,
+            &state.ref_map,
+            selector,
+            &state.iframe_sessions,
+            click_options,
+        )
+        .await?
+    };
     record_click_animation(
         &result,
         &mut state.mouse_state,
@@ -7783,6 +7823,57 @@ fn recording_options_from_command(cmd: &Value) -> Result<recording::RecordingOpt
     Ok(recording::RecordingOptions {
         fps: recording_fps_from_command(cmd)?,
         cursor: cmd.get("cursor").and_then(Value::as_bool).unwrap_or(false),
+        cursor_theme: match cmd.get("cursorTheme") {
+            None => None,
+            Some(value) => Some(
+                value
+                    .as_str()
+                    .ok_or("cursorTheme must be a local JSON path")?
+                    .to_string(),
+            ),
+        },
+        cursor_image: cmd
+            .get("cursorIcon")
+            .or_else(|| cmd.get("cursorImage"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        cursor_scale: match cmd.get("cursorScale") {
+            Some(value) => {
+                let scale = value
+                    .as_f64()
+                    .ok_or_else(|| format!("Invalid cursor scale: {} is not a number", value))?;
+                Some(recording::validate_cursor_scale(scale)?)
+            }
+            None => None,
+        },
+        cursor_hotspot: match cmd.get("cursorHotspot") {
+            Some(value) => {
+                let values = value
+                    .as_array()
+                    .filter(|values| values.len() == 2)
+                    .ok_or_else(|| format!("Invalid cursor hotspot: {} must be [x, y]", value))?;
+                let hotspot = recording::CursorHotspot {
+                    x: values[0].as_f64().ok_or_else(|| {
+                        format!("Invalid cursor hotspot: {} must be [x, y]", value)
+                    })?,
+                    y: values[1].as_f64().ok_or_else(|| {
+                        format!("Invalid cursor hotspot: {} must be [x, y]", value)
+                    })?,
+                };
+                Some(recording::validate_cursor_hotspot(hotspot)?)
+            }
+            None => None,
+        },
+        cursor_size: match cmd.get("cursorSize") {
+            Some(value) => {
+                let size = value
+                    .as_u64()
+                    .and_then(|size| u32::try_from(size).ok())
+                    .ok_or_else(|| format!("Invalid cursor size: {} is not an integer", value))?;
+                Some(recording::validate_cursor_size(size)?)
+            }
+            None => None,
+        },
         contact_sheet: cmd
             .get("contactSheet")
             .and_then(Value::as_bool)
@@ -12980,8 +13071,8 @@ async fn handle_inserttext(cmd: &Value, state: &DaemonState) -> Result<Value, St
 }
 
 /// Move the session cursor along a deterministic eased curve. Human mode adds
-/// a seeded perpendicular bend and samples the path frequently enough for
-/// animation-heavy pages while preserving exact, reproducible endpoints.
+/// a seeded perpendicular bend and cubic ease-out: cover distance quickly,
+/// then decelerate into the exact target. Smooth mode retains symmetric easing.
 /// Schedule steps against one clock so Chrome's response time counts toward
 /// the requested duration instead of being added to every step's delay.
 #[allow(clippy::too_many_arguments)]
@@ -13006,7 +13097,7 @@ async fn move_mouse_interpolated(
     let dy = target_y - start_y;
     let distance = dx.hypot(dy);
     let duration_ms = if duration_ms == 0 && human {
-        (80.0 + distance * 0.35).clamp(100.0, 700.0) as u64
+        human_mouse_duration_ms(distance)
     } else {
         duration_ms
     };
@@ -13036,7 +13127,7 @@ async fn move_mouse_interpolated(
 
     for i in 1..=steps {
         let (x, y) = interpolated_mouse_point(
-            start_x, start_y, target_x, target_y, perp_x, perp_y, bend, i, steps,
+            start_x, start_y, target_x, target_y, perp_x, perp_y, bend, i, steps, human,
         );
         let params = build_mouse_event_params(
             mouse_state,
@@ -13065,6 +13156,13 @@ async fn move_mouse_interpolated(
     Ok(())
 }
 
+/// Human movement has a generous minimum so nearby controls do not look like
+/// the cursor teleported between them. Longer trips scale smoothly without
+/// making a recording drag on indefinitely.
+fn human_mouse_duration_ms(distance: f64) -> u64 {
+    (220.0 + distance * 0.45).clamp(260.0, 900.0) as u64
+}
+
 fn interpolated_mouse_steps(
     distance: f64,
     duration_ms: u64,
@@ -13075,7 +13173,10 @@ fn interpolated_mouse_steps(
         .unwrap_or_else(|| {
             let spatial_steps = ((distance / 12.0).ceil() as usize).clamp(1, 60);
             if human && duration_ms > 0 {
-                spatial_steps.max(duration_ms.div_ceil(16) as usize)
+                // Sample at 120 Hz. Recording at 60 fps can then interpolate
+                // between two real pointer positions instead of displaying a
+                // one-event-per-frame staircase.
+                spatial_steps.max(duration_ms.div_ceil(8) as usize)
             } else {
                 spatial_steps
             }
@@ -13094,13 +13195,22 @@ fn interpolated_mouse_point(
     bend: f64,
     step: usize,
     steps: usize,
+    human: bool,
 ) -> (f64, f64) {
     if step == steps {
         return (target_x, target_y);
     }
     let t = step as f64 / steps as f64;
-    let eased = t * t * (3.0 - 2.0 * t);
-    let curve = 4.0 * t * (1.0 - t) * bend;
+    let eased = if human {
+        1.0 - (1.0 - t).powi(3)
+    } else {
+        t * t * (3.0 - 2.0 * t)
+    };
+    // Parameterize the bend with the same progress as the forward movement.
+    // Otherwise sideways motion continues after forward motion has slowed,
+    // producing a last-second hook instead of a quiet arrival at the target.
+    let curve_progress = if human { eased } else { t };
+    let curve = 4.0 * curve_progress * (1.0 - curve_progress) * bend;
     (
         start_x + (target_x - start_x) * eased + perp_x * curve,
         start_y + (target_y - start_y) * eased + perp_y * curve,
@@ -15311,17 +15421,72 @@ printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"data":{}}'
 
     #[test]
     fn interpolated_mouse_path_uses_easing_and_exact_endpoint() {
-        let midpoint = interpolated_mouse_point(0.0, 0.0, 100.0, 0.0, 0.0, 1.0, 10.0, 1, 2);
+        let midpoint = interpolated_mouse_point(0.0, 0.0, 100.0, 0.0, 0.0, 1.0, 10.0, 1, 2, false);
         assert_eq!(midpoint, (50.0, 10.0));
-        let endpoint = interpolated_mouse_point(0.0, 0.0, 100.0, 0.0, 0.0, 1.0, 10.0, 2, 2);
+        let endpoint = interpolated_mouse_point(0.0, 0.0, 100.0, 0.0, 0.0, 1.0, 10.0, 2, 2, false);
         assert_eq!(endpoint, (100.0, 0.0));
     }
 
     #[test]
     fn human_mouse_path_samples_short_moves_at_animation_cadence() {
-        assert_eq!(interpolated_mouse_steps(10.0, 100, None, true), 7);
-        assert_eq!(interpolated_mouse_steps(10.0, 100, None, false), 1);
+        assert_eq!(interpolated_mouse_steps(10.0, 260, None, true), 33);
+        assert_eq!(interpolated_mouse_steps(10.0, 260, None, false), 1);
         assert_eq!(interpolated_mouse_steps(10.0, 100, Some(3), true), 3);
+    }
+
+    #[test]
+    fn human_mouse_path_starts_fast_and_decelerates_to_exact_target() {
+        for (x, y) in [(10.0_f64, 0.0_f64), (800.0, 300.0), (-800.0, -300.0)] {
+            let distance = x.hypot(y);
+            for bend_sign in [-1.0, 0.0, 1.0] {
+                let bend = bend_sign * (distance * 0.08).min(36.0);
+                let point = |step, steps| {
+                    interpolated_mouse_point(
+                        0.0,
+                        0.0,
+                        x,
+                        y,
+                        -y / distance,
+                        x / distance,
+                        bend,
+                        step,
+                        steps,
+                        true,
+                    )
+                };
+                assert_eq!(point(0, 120), (0.0, 0.0));
+                assert_eq!(point(120, 120), (x, y));
+                let halfway = point(60, 120);
+                let forward_progress = (halfway.0 * x + halfway.1 * y) / distance.powi(2);
+                assert!((forward_progress - 0.875).abs() < 1e-12);
+                // Both perpendicular and forward travel slow down, even on a
+                // short or leftward curved path. No late lateral hook.
+                let mut previous = point(0, 120);
+                let mut previous_speed = f64::INFINITY;
+                for step in 1..=120 {
+                    let current = point(step, 120);
+                    let speed = (current.0 - previous.0).hypot(current.1 - previous.1);
+                    assert!(
+                        speed <= previous_speed + 1e-10,
+                        "speed increased at step {step}"
+                    );
+                    previous = current;
+                    previous_speed = speed;
+                }
+                assert_eq!(
+                    point(30, 60),
+                    halfway,
+                    "curve should not depend on sample count"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn human_mouse_duration_keeps_short_moves_readable() {
+        assert_eq!(human_mouse_duration_ms(10.0), 260);
+        assert_eq!(human_mouse_duration_ms(300.0), 355);
+        assert_eq!(human_mouse_duration_ms(2_000.0), 900);
     }
 
     #[tokio::test]
@@ -17173,7 +17338,9 @@ printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"browser":{"cd
         assert_eq!(result["success"], false);
         let error_msg = result["error"].as_str().unwrap();
         assert!(
-            error_msg.contains("Not yet implemented") || error_msg.contains("Auto-launch failed"),
+            error_msg.contains("Not yet implemented")
+                || error_msg.contains("Auto-launch failed")
+                || error_msg.contains("CDP connection failed"),
             "Unexpected error: {}",
             error_msg
         );

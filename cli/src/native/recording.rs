@@ -1,5 +1,7 @@
+use base64::Engine;
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
+use std::fs;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -21,6 +23,11 @@ pub const DEFAULT_FPS: u32 = 30;
 /// work) where the extra temporal detail is the point.
 pub const MAX_FPS: u32 = 60;
 
+/// Chrome's screencast producer runs at up to 60 fps. Sampling at the output
+/// rate avoids decoding and transporting frames the recording encoder would
+/// discard, which is especially important for 4K Electron captures.
+const CHROME_SCREENCAST_FPS: u32 = 60;
+
 /// Changed-pixel ratio that selects a contact-sheet frame when the caller
 /// does not provide one. Five percent filters minor animation while retaining
 /// meaningful UI transitions.
@@ -28,6 +35,21 @@ pub const DEFAULT_CONTACT_SHEET_THRESHOLD: f64 = 0.05;
 
 /// Contact sheets stay reviewable and memory-bounded during long recordings.
 pub const MAX_CONTACT_SHEET_FRAMES: usize = 100;
+
+/// Default presentation size for the synthetic recording pointer. Unlike the
+/// operating-system pointer, this is rendered directly into video frames.
+pub const DEFAULT_CURSOR_SIZE: u32 = 28;
+
+/// Keep custom cursor images prominent without allowing an accidental asset to
+/// dominate the frame or make per-frame compositing expensive.
+pub const MAX_CURSOR_SIZE: u32 = 512;
+
+/// A recording cursor can be enlarged beyond the OS cursor. The scale is
+/// applied to a custom icon's intrinsic dimensions, or to the 28px built-in
+/// pointer when no icon is supplied.
+pub const MAX_CURSOR_SCALE: f64 = 16.0;
+
+const MAX_CURSOR_IMAGE_BYTES: u64 = 2 * 1024 * 1024;
 
 const CONTACT_SHEET_COLUMNS: u32 = 4;
 const CONTACT_SHEET_CELL_WIDTH: u32 = 640;
@@ -47,9 +69,23 @@ const CONTACT_SHEET_BURST_FRAMES: usize = 7;
 /// Rate above which the live encoder uses additional threads.
 const HIGH_FPS_THRESHOLD: u32 = 30;
 const HIGH_FPS_ENCODER_THREADS: &str = "4";
+/// JPEG makes sustained 4K screencasts practical: PNG decoding otherwise
+/// blocks the encoder pipe long enough to make pointer movement appear to
+/// pause. Quality 90 preserves UI text and vector edges cleanly.
+const RECORDING_JPEG_QUALITY: u8 = 70;
+
+/// VideoToolbox keeps high-resolution captures responsive on macOS. Other
+/// platforms keep the portable libx264 path below.
+#[cfg(target_os = "macos")]
+const MACOS_H264_RECORDING_QUALITY: &str = "70";
 
 /// VP8 budget chosen for readable UI text and thin drawing strokes.
 const WEBM_BITRATE_KBPS: u32 = 8000;
+
+/// Keep H.264 UI recordings crisp at desktop and retina-sized viewports.
+/// The faster preset trades compression efficiency for real-time encoding, so
+/// a lower CRF is necessary to avoid soft text and cursor edges.
+const H264_RECORDING_CRF: &str = "16";
 
 /// Captured frames may wait briefly for compositing, but overload must fail
 /// the recording instead of silently degrading it into held frames.
@@ -121,6 +157,10 @@ pub fn validate_fps(fps: u32) -> Result<u32, String> {
 
 fn frame_period(fps: u32) -> Duration {
     Duration::from_micros(1_000_000 / fps.clamp(1, MAX_FPS) as u64)
+}
+
+fn screencast_every_nth_frame(fps: u32) -> u32 {
+    CHROME_SCREENCAST_FPS.div_ceil(fps.clamp(1, MAX_FPS)).max(1)
 }
 
 /// The CDP session a recording attaches to its page target for its screencast.
@@ -236,11 +276,335 @@ pub fn cursor_timestamp() -> f64 {
 
 pub type SharedRecordingCursor = Arc<Mutex<RecordingCursorHistory>>;
 
+/// The visual cursor used by a recording. A custom image is rasterized once
+/// when recording starts, so its size is independent from the host OS cursor.
+#[derive(Clone, Debug)]
+pub struct RecordingCursorStyle {
+    image: Option<Arc<image::RgbaImage>>,
+    pressed_image: Option<Arc<image::RgbaImage>>,
+    size: u32,
+    width: u32,
+    height: u32,
+    hotspot_x: f64,
+    hotspot_y: f64,
+    overlay_data_url: Option<String>,
+    theme: Option<Value>,
+}
+
+/// The pointer location inside a custom cursor icon, measured in the icon's
+/// unscaled coordinate system. SVG does not standardize cursor hotspots, so
+/// callers supply this when the arrow tip is not at (0, 0).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CursorHotspot {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Default for RecordingCursorStyle {
+    fn default() -> Self {
+        Self {
+            image: None,
+            pressed_image: None,
+            size: DEFAULT_CURSOR_SIZE,
+            width: DEFAULT_CURSOR_SIZE,
+            height: DEFAULT_CURSOR_SIZE,
+            hotspot_x: 0.0,
+            hotspot_y: 0.0,
+            overlay_data_url: None,
+            theme: None,
+        }
+    }
+}
+
+impl RecordingCursorStyle {
+    fn from_options(options: &RecordingOptions) -> Result<Self, String> {
+        if let Some(path) = &options.cursor_theme {
+            return Self::from_theme(path, options);
+        }
+        let scale = validate_cursor_scale(options.cursor_scale.unwrap_or(1.0))?;
+        let Some(path) = options.cursor_image.as_deref() else {
+            if options.cursor_hotspot.is_some() {
+                return Err("--cursor-hotspot requires --cursor-icon".to_string());
+            }
+            let size = validate_cursor_size((DEFAULT_CURSOR_SIZE as f64 * scale).round() as u32)?;
+            return Ok(Self {
+                size,
+                ..Self::default()
+            });
+        };
+
+        let (intrinsic_width, intrinsic_height) = cursor_intrinsic_dimensions(path)?;
+        let size = match options.cursor_size {
+            Some(size) => validate_cursor_size(size)?,
+            None => {
+                let intrinsic_size = intrinsic_width.max(intrinsic_height).max(1);
+                validate_cursor_size((intrinsic_size as f64 * scale).round() as u32)?
+            }
+        };
+        let (image, overlay_data_url) = load_cursor_image(path, size)?;
+        let output_scale = image.width() as f64 / intrinsic_width.max(1) as f64;
+        let hotspot = options
+            .cursor_hotspot
+            .unwrap_or(CursorHotspot { x: 0.0, y: 0.0 });
+        validate_cursor_hotspot(hotspot)?;
+        if hotspot.x > intrinsic_width as f64 || hotspot.y > intrinsic_height as f64 {
+            return Err(format!(
+                "Cursor hotspot {},{} is outside the icon's {}x{} bounds",
+                hotspot.x, hotspot.y, intrinsic_width, intrinsic_height
+            ));
+        }
+        let pressed_width = ((image.width() as f64 * CURSOR_PRESS_SCALE).round() as u32).max(1);
+        let pressed_height = ((image.height() as f64 * CURSOR_PRESS_SCALE).round() as u32).max(1);
+        let pressed = image::imageops::resize(
+            &image,
+            pressed_width,
+            pressed_height,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let width = image.width();
+        let height = image.height();
+        Ok(Self {
+            image: Some(Arc::new(image)),
+            pressed_image: Some(Arc::new(pressed)),
+            size,
+            width,
+            height,
+            hotspot_x: hotspot.x * output_scale,
+            hotspot_y: hotspot.y * output_scale,
+            overlay_data_url: Some(overlay_data_url),
+            theme: None,
+        })
+    }
+
+    /// Resolve a local theme once, before capture. All images and hotspots are
+    /// embedded in the isolated overlay; switching never performs file IO.
+    fn from_theme(path: &str, options: &RecordingOptions) -> Result<Self, String> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Icon {
+            icon: String,
+            hotspot: [f64; 2],
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Theme {
+            default: Icon,
+            pointer: Option<Icon>,
+            text: Option<Icon>,
+        }
+        if options.cursor_image.is_some()
+            || options.cursor_hotspot.is_some()
+            || options.cursor_size.is_some()
+        {
+            return Err("--cursor-theme cannot be combined with --cursor-icon, --cursor-hotspot, or --cursor-size; use each theme entry's icon and hotspot".into());
+        }
+        let contents = fs::read_to_string(path)
+            .map_err(|e| format!("Unable to read cursor theme {path}: {e}"))?;
+        let theme: Theme = serde_json::from_str(&contents)
+            .map_err(|e| format!("Invalid cursor theme {path}: {e}"))?;
+        let directory = Path::new(path).parent().unwrap_or_else(|| Path::new("."));
+        let load = |icon: Icon| {
+            Self::from_options(&RecordingOptions {
+                cursor_image: Some(directory.join(icon.icon).to_string_lossy().into_owned()),
+                cursor_scale: options.cursor_scale,
+                cursor_hotspot: Some(CursorHotspot {
+                    x: icon.hotspot[0],
+                    y: icon.hotspot[1],
+                }),
+                ..Default::default()
+            })
+        };
+        let mut style = load(theme.default)?;
+        let mut variants = json!({ "default": style.overlay_config() });
+        for (name, icon) in [("pointer", theme.pointer), ("text", theme.text)] {
+            if let Some(icon) = icon {
+                variants[name] = load(icon)?.overlay_config();
+            }
+        }
+        style.theme = Some(variants);
+        Ok(style)
+    }
+
+    fn image_for(&self, pressed: bool) -> Option<&image::RgbaImage> {
+        if pressed {
+            self.pressed_image.as_deref()
+        } else {
+            self.image.as_deref()
+        }
+    }
+
+    fn overlay_config(&self) -> Value {
+        json!({
+            "size": self.size,
+            "width": self.width,
+            "height": self.height,
+            "hotspotX": self.hotspot_x,
+            "hotspotY": self.hotspot_y,
+            "imageDataUrl": self.overlay_data_url,
+            "theme": self.theme,
+        })
+    }
+}
+
+/// Reject cursor sizes that cannot be rendered efficiently or visibly.
+pub fn validate_cursor_size(size: u32) -> Result<u32, String> {
+    if (1..=MAX_CURSOR_SIZE).contains(&size) {
+        Ok(size)
+    } else {
+        Err(format!(
+            "Invalid cursor size: {} is out of range (valid range: 1-{})",
+            size, MAX_CURSOR_SIZE
+        ))
+    }
+}
+
+/// Reject cursor scale factors that would make the recording pointer
+/// imperceptible or too expensive to composite.
+pub fn validate_cursor_scale(scale: f64) -> Result<f64, String> {
+    if scale.is_finite() && scale > 0.0 && scale <= MAX_CURSOR_SCALE {
+        Ok(scale)
+    } else {
+        Err(format!(
+            "Invalid cursor scale: {} is out of range (valid range: above 0 through {})",
+            scale, MAX_CURSOR_SCALE
+        ))
+    }
+}
+
+/// Validate a hotspot before scaling it into video pixels.
+pub fn validate_cursor_hotspot(hotspot: CursorHotspot) -> Result<CursorHotspot, String> {
+    if hotspot.x.is_finite() && hotspot.y.is_finite() && hotspot.x >= 0.0 && hotspot.y >= 0.0 {
+        Ok(hotspot)
+    } else {
+        Err("Invalid cursor hotspot: coordinates must be finite and non-negative".to_string())
+    }
+}
+
+fn cursor_image_mime_type(path: &str) -> Option<&'static str> {
+    match Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("svg") => Some("image/svg+xml"),
+        Some("png") => Some("image/png"),
+        Some("jpg" | "jpeg") => Some("image/jpeg"),
+        Some("webp") => Some("image/webp"),
+        _ => None,
+    }
+}
+
+fn cursor_intrinsic_dimensions(path: &str) -> Result<(u32, u32), String> {
+    let mime_type = cursor_image_mime_type(path).ok_or_else(|| {
+        format!(
+            "Unsupported cursor icon '{}'. Use an SVG, PNG, JPEG, or WebP file",
+            path
+        )
+    })?;
+    let bytes = fs::read(path)
+        .map_err(|error| format!("Unable to read cursor icon '{}': {}", path, error))?;
+    if mime_type == "image/svg+xml" {
+        let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default())
+            .map_err(|error| format!("Unable to parse SVG cursor: {}", error))?;
+        let width = tree.size().width();
+        let height = tree.size().height();
+        if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
+            return Ok((width.ceil() as u32, height.ceil() as u32));
+        }
+        return Err("SVG cursor has no visible size".to_string());
+    }
+    let image = image::load_from_memory(&bytes)
+        .map_err(|error| format!("Unable to decode cursor icon '{}': {}", path, error))?;
+    Ok((image.width().max(1), image.height().max(1)))
+}
+
+fn load_cursor_image(path: &str, size: u32) -> Result<(image::RgbaImage, String), String> {
+    let mime_type = cursor_image_mime_type(path).ok_or_else(|| {
+        format!(
+            "Unsupported cursor icon '{}'. Use an SVG, PNG, JPEG, or WebP file",
+            path
+        )
+    })?;
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("Unable to read cursor icon '{}': {}", path, error))?;
+    if !metadata.is_file() {
+        return Err(format!("Cursor icon '{}' is not a file", path));
+    }
+    if metadata.len() > MAX_CURSOR_IMAGE_BYTES {
+        return Err(format!(
+            "Cursor icon '{}' is larger than the {} byte limit",
+            path, MAX_CURSOR_IMAGE_BYTES
+        ));
+    }
+    let bytes = fs::read(path)
+        .map_err(|error| format!("Unable to read cursor icon '{}': {}", path, error))?;
+    let image = if mime_type == "image/svg+xml" {
+        rasterize_svg_cursor(&bytes, size)?
+    } else {
+        let image = image::load_from_memory(&bytes)
+            .map_err(|error| format!("Unable to decode cursor icon '{}': {}", path, error))?
+            .to_rgba8();
+        resize_cursor_image(&image, size)
+    };
+    let data_url = format!(
+        "data:{};base64,{}",
+        mime_type,
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    );
+    Ok((image, data_url))
+}
+
+fn resize_cursor_image(image: &image::RgbaImage, size: u32) -> image::RgbaImage {
+    let longest = image.width().max(image.height()).max(1);
+    let scale = size as f64 / longest as f64;
+    let width = ((image.width() as f64 * scale).round() as u32).max(1);
+    let height = ((image.height() as f64 * scale).round() as u32).max(1);
+    image::imageops::resize(image, width, height, image::imageops::FilterType::Lanczos3)
+}
+
+fn rasterize_svg_cursor(bytes: &[u8], size: u32) -> Result<image::RgbaImage, String> {
+    let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default())
+        .map_err(|error| format!("Unable to parse SVG cursor: {}", error))?;
+    let svg_size = tree.size();
+    let longest = svg_size.width().max(svg_size.height());
+    if !longest.is_finite() || longest <= 0.0 {
+        return Err("SVG cursor has no visible size".to_string());
+    }
+    let scale = size as f32 / longest;
+    let width = (svg_size.width() * scale).ceil().max(1.0) as u32;
+    let height = (svg_size.height() * scale).ceil().max(1.0) as u32;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
+        .ok_or("Unable to allocate SVG cursor image")?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    let mut pixels = pixmap.data().to_vec();
+    for pixel in pixels.chunks_exact_mut(4) {
+        let alpha = pixel[3];
+        if alpha == 0 {
+            pixel[0] = 0;
+            pixel[1] = 0;
+            pixel[2] = 0;
+            continue;
+        }
+        for channel in &mut pixel[..3] {
+            *channel = ((*channel as u16 * 255 + alpha as u16 / 2) / alpha as u16).min(255) as u8;
+        }
+    }
+    image::RgbaImage::from_raw(width, height, pixels)
+        .ok_or("Unable to create rasterized SVG cursor image".to_string())
+}
+
 const CURSOR_OVERLAY_SCRIPT: &str = include_str!("recording-cursor.js");
 
 /// Paint recording feedback with the page so drags share the same compositor
 /// frame. An isolated world and a closed shadow root keep it out of page scripts
 /// and styles; the host is inert and absent from accessibility snapshots.
+/// A DPR-aware canvas keeps the damage region stable so Chromium's animated
+/// content sampler does not suppress cursor-only frames after a canvas drag.
 pub struct CursorOverlay {
     script_id: String,
     world_name: String,
@@ -252,11 +616,12 @@ pub async fn ensure_cursor_overlays(
     client: &CdpClient,
     overlays: &SharedCursorOverlays,
     sessions: &[String],
+    style: &RecordingCursorStyle,
 ) -> Result<(), String> {
     let mut installed = overlays.lock().await;
     for session in sessions {
         if !installed.contains_key(session) {
-            let overlay = CursorOverlay::install(client, session).await?;
+            let overlay = CursorOverlay::install(client, session, style).await?;
             installed.insert(session.clone(), overlay);
         }
     }
@@ -271,16 +636,26 @@ pub async fn remove_cursor_overlays(client: &CdpClient, overlays: &SharedCursorO
 }
 
 impl CursorOverlay {
-    async fn install(client: &CdpClient, session_id: &str) -> Result<Self, String> {
+    async fn install(
+        client: &CdpClient,
+        session_id: &str,
+        style: &RecordingCursorStyle,
+    ) -> Result<Self, String> {
         client
             .send_command_no_params("Page.enable", Some(session_id))
             .await?;
         let world_name = format!("agent-browser-recording-{session_id}");
+        let config = serde_json::to_string(&style.overlay_config())
+            .map_err(|error| format!("Unable to serialize recording cursor style: {}", error))?;
+        let source = format!(
+            "globalThis.__agentBrowserRecordingCursorConfig = {};\n{}",
+            config, CURSOR_OVERLAY_SCRIPT
+        );
         let result = client
             .send_command(
                 "Page.addScriptToEvaluateOnNewDocument",
                 Some(json!({
-                    "source": CURSOR_OVERLAY_SCRIPT,
+                    "source": source,
                     "worldName": world_name,
                     "runImmediately": true,
                 })),
@@ -442,8 +817,38 @@ fn composite_ripple(frame: &mut image::RgbImage, x: f64, y: f64, progress: f64) 
 
 /// Draw the recording pointer after the clean frame has been analyzed for the
 /// contact sheet, keeping presentation pixels out of change detection.
-fn composite_cursor(frame: &mut image::RgbImage, cursor: RecordingCursorState) {
+fn composite_cursor(
+    frame: &mut image::RgbImage,
+    cursor: RecordingCursorState,
+    style: &RecordingCursorStyle,
+) {
     if !cursor.visible {
+        return;
+    }
+    if let Some(image) = style.image_for(cursor.buttons != 0) {
+        let hotspot_scale = if cursor.buttons == 0 {
+            1.0
+        } else {
+            CURSOR_PRESS_SCALE
+        };
+        let origin_x = (cursor.x - style.hotspot_x * hotspot_scale).round() as i64;
+        let origin_y = (cursor.y - style.hotspot_y * hotspot_scale).round() as i64;
+        for (x, y, pixel) in image.enumerate_pixels() {
+            let target_x = origin_x + x as i64;
+            let target_y = origin_y + y as i64;
+            if target_x < 0
+                || target_y < 0
+                || target_x >= frame.width() as i64
+                || target_y >= frame.height() as i64
+            {
+                continue;
+            }
+            blend_pixel(
+                frame.get_pixel_mut(target_x as u32, target_y as u32),
+                [pixel[0], pixel[1], pixel[2]],
+                pixel[3] as f64 / 255.0,
+            );
+        }
         return;
     }
     let pressed_scale = if cursor.buttons == 0 {
@@ -451,7 +856,7 @@ fn composite_cursor(frame: &mut image::RgbImage, cursor: RecordingCursorState) {
     } else {
         CURSOR_PRESS_SCALE
     };
-    let scale = CURSOR_BASE_SCALE * pressed_scale;
+    let scale = style.size as f64 / 24.0 * pressed_scale;
     let points: Vec<(f64, f64)> = CURSOR_PATH
         .iter()
         .map(|&(x, y)| (cursor.x + x * scale, cursor.y + y * scale))
@@ -505,11 +910,15 @@ fn composite_cursor(frame: &mut image::RgbImage, cursor: RecordingCursorState) {
 
 /// PPM carries exact RGB pixels to FFmpeg and supports frame-size changes.
 /// Only the video encoder compresses the composited frame.
-fn cursor_video_frame(source: &[u8], cursor: RecordingCursorState) -> Result<Vec<u8>, String> {
+fn cursor_video_frame(
+    source: &[u8],
+    cursor: RecordingCursorState,
+    style: &RecordingCursorStyle,
+) -> Result<Vec<u8>, String> {
     let mut frame = image::load_from_memory(source)
         .map_err(|e| format!("Failed to decode recording frame: {}", e))?
         .to_rgb8();
-    composite_cursor(&mut frame, cursor);
+    composite_cursor(&mut frame, cursor, style);
     let mut output = format!("P6\n{} {}\n255\n", frame.width(), frame.height()).into_bytes();
     output.extend_from_slice(frame.as_raw());
     Ok(output)
@@ -534,6 +943,8 @@ pub struct RecordingState {
     pub capture_session: SharedCaptureSession,
     /// Whether the encoded video includes a synthetic pointer.
     pub cursor: bool,
+    /// Appearance of the synthetic pointer for the active recording.
+    pub cursor_style: RecordingCursorStyle,
     /// Last acknowledged input, including coordinates mapped out of iframes.
     pub shared_cursor: SharedRecordingCursor,
     /// Per-target cursor overlays, including out-of-process iframes.
@@ -560,6 +971,7 @@ impl RecordingState {
             cancel_tx: None,
             capture_session: Arc::new(Mutex::new(None)),
             cursor: false,
+            cursor_style: RecordingCursorStyle::default(),
             shared_cursor: Arc::new(Mutex::new(RecordingCursorHistory::default())),
             cursor_overlays: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             contact_sheet: false,
@@ -569,10 +981,20 @@ impl RecordingState {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RecordingOptions {
     pub fps: Option<u32>,
     pub cursor: bool,
+    /// Local SVG, PNG, JPEG, or WebP file used for the recording pointer.
+    pub cursor_image: Option<String>,
+    /// Local JSON mapping default/pointer/text to icons and unscaled hotspots.
+    pub cursor_theme: Option<String>,
+    /// Enlarges the custom cursor's intrinsic size, or the built-in pointer.
+    pub cursor_scale: Option<f64>,
+    /// Pointer location within a custom icon, in its unscaled coordinates.
+    pub cursor_hotspot: Option<CursorHotspot>,
+    /// Presentation size in video pixels for the built-in or custom pointer.
+    pub cursor_size: Option<u32>,
     pub contact_sheet: bool,
     pub contact_sheet_threshold: f64,
 }
@@ -582,6 +1004,11 @@ impl Default for RecordingOptions {
         Self {
             fps: None,
             cursor: false,
+            cursor_image: None,
+            cursor_theme: None,
+            cursor_scale: None,
+            cursor_hotspot: None,
+            cursor_size: None,
             contact_sheet: false,
             contact_sheet_threshold: DEFAULT_CONTACT_SHEET_THRESHOLD,
         }
@@ -638,6 +1065,13 @@ pub fn recording_start(
     validate_output_path(path)?;
     let fps = validate_fps(options.fps.unwrap_or(DEFAULT_FPS))?;
     let threshold = validate_contact_sheet_threshold(options.contact_sheet_threshold)?;
+    let cursor_style = RecordingCursorStyle::from_options(&options)?;
+    let cursor_enabled = options.cursor
+        || options.cursor_theme.is_some()
+        || options.cursor_image.is_some()
+        || options.cursor_scale.is_some()
+        || options.cursor_hotspot.is_some()
+        || options.cursor_size.is_some();
 
     state.active = true;
     state.output_path = path.to_string();
@@ -645,10 +1079,11 @@ pub fn recording_start(
     state.frame_count = 0;
     state.captured_count = 0;
     state.contact_sheet_frame_count = 0;
-    state.cursor = options.cursor;
-    if let Ok(mut cursor) = state.shared_cursor.lock() {
-        *cursor = RecordingCursorHistory {
-            enabled: options.cursor,
+    state.cursor = cursor_enabled;
+    state.cursor_style = cursor_style;
+    if let Ok(mut cursor_history) = state.shared_cursor.lock() {
+        *cursor_history = RecordingCursorHistory {
+            enabled: cursor_enabled,
             ..Default::default()
         };
     }
@@ -660,7 +1095,12 @@ pub fn recording_start(
         "started": true,
         "path": path,
         "fps": fps,
-        "cursor": options.cursor,
+        "cursor": cursor_enabled,
+        "cursorIcon": options.cursor_image,
+        "cursorTheme": options.cursor_theme,
+        "cursorScale": options.cursor_scale.unwrap_or(1.0),
+        "cursorHotspot": options.cursor_hotspot.map(|hotspot| json!([hotspot.x, hotspot.y])),
+        "cursorSize": state.cursor_style.size,
         "contactSheet": options.contact_sheet
     });
     if let Some(ref contact_path) = state.contact_sheet_path {
@@ -714,7 +1154,7 @@ fn build_ffmpeg_command(output_path: &str, fps: u32, cursor: bool) -> tokio::pro
             "-f",
             "image2pipe",
             "-c:v",
-            if cursor { "ppm" } else { "png" },
+            if cursor { "ppm" } else { "mjpeg" },
             "-framerate",
             &fps.to_string(),
             "-i",
@@ -728,7 +1168,15 @@ fn build_ffmpeg_command(output_path: &str, fps: u32, cursor: bool) -> tokio::pro
             .args(["-b:v", &format!("{}k", WEBM_BITRATE_KBPS)])
             .args(["-deadline", "realtime", "-cpu-used", "4"]);
     } else {
-        cmd.args(["-c:v", "libx264", "-preset", "ultrafast"]);
+        // Hardware encoding prevents a 4K capture from competing with the
+        // browser's input and compositing work. VideoToolbox uses a quality
+        // scale instead of libx264's CRF/preset controls.
+        #[cfg(target_os = "macos")]
+        cmd.args(["-c:v", "h264_videotoolbox"])
+            .args(["-q:v", MACOS_H264_RECORDING_QUALITY]);
+        #[cfg(not(target_os = "macos"))]
+        cmd.args(["-c:v", "libx264", "-preset", "ultrafast"])
+            .args(["-crf", H264_RECORDING_CRF]);
     }
 
     // One encoder thread keeps CPU away from the browser at ordinary rates;
@@ -1211,6 +1659,7 @@ fn render_contact_cell(
             source.width(),
             source.height(),
         ),
+        &RecordingCursorStyle::default(),
     );
     let rendered = image::DynamicImage::ImageRgb8(display)
         .resize(
@@ -1437,6 +1886,7 @@ pub fn spawn_recording_task(
     shared_count: Arc<AtomicU64>,
     shared_captured: Arc<AtomicU64>,
     cursor: bool,
+    cursor_style: RecordingCursorStyle,
     shared_cursor: SharedRecordingCursor,
     cursor_overlays: SharedCursorOverlays,
     iframe_sessions: Vec<String>,
@@ -1450,7 +1900,9 @@ pub fn spawn_recording_task(
         if cursor {
             let mut sessions = iframe_sessions;
             sessions.push(capture_session.clone());
-            if let Err(error) = ensure_cursor_overlays(&client, &cursor_overlays, &sessions).await {
+            if let Err(error) =
+                ensure_cursor_overlays(&client, &cursor_overlays, &sessions, &cursor_style).await
+            {
                 remove_cursor_overlays(&client, &cursor_overlays).await;
                 detach_capture_session(&client, &capture_session).await;
                 return Err(format!("Failed to install recording cursor: {error}"));
@@ -1483,7 +1935,7 @@ pub fn spawn_recording_task(
             frame_rx,
         ));
 
-        // Chrome does not reliably emit an initial PNG screencast frame for a
+        // Chrome does not reliably emit an initial screencast frame for a
         // static page. Seed both outputs before listening for later repaints.
         let frame = CapturedVideoFrame {
             sequence: 0,
@@ -1502,8 +1954,9 @@ pub fn spawn_recording_task(
                 .send_command(
                     "Page.startScreencast",
                     Some(json!({
-                        "format": "png",
-                        "everyNthFrame": 1,
+                        "format": "jpeg",
+                        "quality": RECORDING_JPEG_QUALITY,
+                        "everyNthFrame": screencast_every_nth_frame(fps),
                     })),
                     Some(&capture_session),
                 )
@@ -1521,6 +1974,7 @@ pub fn spawn_recording_task(
                     frame_tx,
                     contact_tx,
                     &shared_captured,
+                    fps,
                     cancel_rx,
                 )
                 .await
@@ -1614,7 +2068,11 @@ pub async fn capture_initial_image(
     let result = client
         .send_command(
             "Page.captureScreenshot",
-            Some(json!({"format": "png", "fromSurface": true})),
+            Some(json!({
+                "format": "jpeg",
+                "quality": RECORDING_JPEG_QUALITY,
+                "fromSurface": true,
+            })),
             Some(session_id),
         )
         .await
@@ -1628,6 +2086,8 @@ pub async fn capture_initial_image(
     })
 }
 
+// Keep the task's independent channels and cancellation signal explicit.
+#[allow(clippy::too_many_arguments)]
 async fn collect_frames(
     client: &CdpClient,
     capture_session: &str,
@@ -1635,10 +2095,13 @@ async fn collect_frames(
     frame_tx: mpsc::Sender<CapturedVideoFrame>,
     contact_tx: Option<std::sync::mpsc::SyncSender<CapturedVideoFrame>>,
     shared_captured: &AtomicU64,
+    fps: u32,
     cancel_rx: oneshot::Receiver<()>,
 ) -> Result<(), String> {
     let mut cancel_rx = std::pin::pin!(cancel_rx);
     let started = tokio::time::Instant::now();
+    let frame_interval = Duration::from_secs_f64(1.0 / f64::from(fps));
+    let mut last_emitted_at = started;
     let mut sequence = 1u64;
 
     loop {
@@ -1647,6 +2110,15 @@ async fn collect_frames(
             event = events.recv() => {
                 let Some(event) = event else { break };
                 if event.method == "Page.screencastFrame" {
+                    // A screencast frame is held by Chromium until it is
+                    // acknowledged. Pace that acknowledgement instead of
+                    // acknowledging a 60 fps stream and discarding work after
+                    // the fact: this is the back-pressure that keeps CDP and
+                    // the Electron renderer responsive during recording.
+                    let remaining = frame_interval.saturating_sub(last_emitted_at.elapsed());
+                    if !remaining.is_zero() {
+                        tokio::time::sleep(remaining).await;
+                    }
                     if let Some(sid) = event.params.get("sessionId").and_then(Value::as_i64) {
                         let _ = client
                             .send_command_no_wait(
@@ -1673,6 +2145,7 @@ async fn collect_frames(
                             device_height: metadata["deviceHeight"].as_f64().unwrap_or(0.0),
                         };
                         sequence += 1;
+                        last_emitted_at = tokio::time::Instant::now();
                         shared_captured.fetch_add(1, Ordering::Relaxed);
                         frame_tx.try_send(frame.clone()).map_err(|error| match error {
                             mpsc::error::TrySendError::Full(_) => format!(
@@ -1773,6 +2246,7 @@ fn render_cursor_frame(
     frame: &CapturedVideoFrame,
     history: &RecordingCursorHistory,
     output_timestamp: f64,
+    style: &RecordingCursorStyle,
     decoded: &mut Option<(u64, image::RgbImage)>,
 ) -> Result<Vec<u8>, String> {
     if decoded.as_ref().is_none_or(|(id, _)| *id != frame.sequence) {
@@ -1800,7 +2274,7 @@ fn render_cursor_frame(
             (output_timestamp - started) / RIPPLE_DURATION_SECS,
         );
     }
-    composite_cursor(&mut rendered, state);
+    composite_cursor(&mut rendered, state, style);
     let mut bytes = format!("P6\n{} {}\n255\n", rendered.width(), rendered.height()).into_bytes();
     bytes.extend_from_slice(rendered.as_raw());
     Ok(bytes)
@@ -1850,7 +2324,13 @@ async fn encode_stream(
                     .unwrap_or_default();
                 if cursor {
                     let bytes =
-                        render_cursor_frame(frame, &history, output_timestamp, &mut decoded)?;
+                        render_cursor_frame(
+                            frame,
+                            &history,
+                            output_timestamp,
+                            &RecordingCursorStyle::default(),
+                            &mut decoded,
+                        )?;
                     write_encoder_bytes(&mut stdin, &bytes).await?;
                 } else {
                     write_encoder_bytes(&mut stdin, &frame.image_data).await?;
@@ -1869,7 +2349,13 @@ async fn encode_stream(
             .lock()
             .map(|history| history.clone())
             .unwrap_or_default();
-        render_cursor_frame(frame, &history, output_timestamp, &mut decoded)?
+        render_cursor_frame(
+            frame,
+            &history,
+            output_timestamp,
+            &RecordingCursorStyle::default(),
+            &mut decoded,
+        )?
     } else {
         frame.image_data.as_ref().clone()
     };
@@ -2233,6 +2719,7 @@ mod tests {
                     buttons,
                     visible: true,
                 },
+                &RecordingCursorStyle::default(),
             );
             assert!(output.get_pixel(40, 31)[0] < 180);
             assert_eq!(output.get_pixel(10, 10), frame.get_pixel(10, 10));
@@ -2251,6 +2738,7 @@ mod tests {
                 buttons: 0,
                 visible: true,
             },
+            &RecordingCursorStyle::default(),
         );
         assert!(frame
             .pixels()
@@ -2423,7 +2911,12 @@ mod tests {
             .unwrap();
         let decoded = image::load_from_memory(&png).unwrap().to_rgb8();
         let header = b"P6\n64 64\n255\n";
-        let plain = cursor_video_frame(&png, RecordingCursorState::default()).unwrap();
+        let plain = cursor_video_frame(
+            &png,
+            RecordingCursorState::default(),
+            &RecordingCursorStyle::default(),
+        )
+        .unwrap();
         assert_eq!(&plain[..header.len()], header);
         assert_eq!(&plain[header.len()..], decoded.as_raw());
         let composited = cursor_video_frame(
@@ -2434,6 +2927,7 @@ mod tests {
                 buttons: 1,
                 visible: true,
             },
+            &RecordingCursorStyle::default(),
         )
         .unwrap();
         for y in 0..64 {
@@ -2477,6 +2971,77 @@ mod tests {
         let result = recording_start(&mut state, "/tmp/test.webm", options(Some(60))).unwrap();
         assert_eq!(state.fps, 60);
         assert_eq!(result["fps"], 60);
+    }
+
+    #[test]
+    fn custom_svg_cursor_scales_its_hotspot_with_the_icon() {
+        let directory = tempfile::tempdir().unwrap();
+        let icon_path = directory.path().join("cursor.svg");
+        std::fs::write(
+            &icon_path,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><path d="M0 0h20v10z"/></svg>"#,
+        )
+        .unwrap();
+        let options = RecordingOptions {
+            cursor_image: Some(icon_path.to_string_lossy().into_owned()),
+            cursor_scale: Some(2.0),
+            cursor_hotspot: Some(CursorHotspot { x: 3.0, y: 2.0 }),
+            ..RecordingOptions::default()
+        };
+        let style = RecordingCursorStyle::from_options(&options).unwrap();
+        assert_eq!((style.width, style.height), (40, 20));
+        assert_eq!((style.hotspot_x, style.hotspot_y), (6.0, 4.0));
+        assert!(style
+            .overlay_data_url
+            .as_deref()
+            .is_some_and(|url| url.starts_with("data:image/svg+xml;base64,")));
+    }
+
+    #[test]
+    fn cursor_theme_loads_relative_icons_and_validates_entries() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("arrow.svg"), r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><path d="M0 0h20v20z"/></svg>"#).unwrap();
+        let path = directory.path().join("theme.json");
+        let mut theme = json!({"default":{"icon":"arrow.svg","hotspot":[2,3]},"pointer":{"icon":"arrow.svg","hotspot":[5,6]},"text":{"icon":"arrow.svg","hotspot":[10,10]}});
+        fs::write(&path, theme.to_string()).unwrap();
+        let options = RecordingOptions {
+            cursor_theme: Some(path.to_string_lossy().into_owned()),
+            cursor_scale: Some(2.0),
+            ..Default::default()
+        };
+        let config = RecordingCursorStyle::from_options(&options)
+            .unwrap()
+            .overlay_config();
+        assert_eq!(config["theme"]["default"]["hotspotX"], 4.0);
+        assert_eq!(config["theme"]["pointer"]["hotspotY"], 12.0);
+        assert_eq!(config["theme"]["text"]["width"], 40);
+        assert!(config["theme"]["pointer"]["imageDataUrl"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:"));
+        let mut conflict = options.clone();
+        conflict.cursor_image = Some("arrow.svg".into());
+        assert!(RecordingCursorStyle::from_options(&conflict)
+            .unwrap_err()
+            .contains("cannot be combined"));
+        theme["text"]["hotspot"] = json!([50, 10]);
+        fs::write(&path, theme.to_string()).unwrap();
+        assert!(RecordingCursorStyle::from_options(&options)
+            .unwrap_err()
+            .contains("outside"));
+        theme.as_object_mut().unwrap().remove("text");
+        theme.as_object_mut().unwrap().remove("pointer");
+        fs::write(&path, theme.to_string()).unwrap();
+        assert!(RecordingCursorStyle::from_options(&options).is_ok());
+        theme.as_object_mut().unwrap().remove("default");
+        fs::write(&path, theme.to_string()).unwrap();
+        assert!(RecordingCursorStyle::from_options(&options)
+            .unwrap_err()
+            .contains("default"));
+        fs::write(&path, "not json").unwrap();
+        assert!(RecordingCursorStyle::from_options(&options)
+            .unwrap_err()
+            .contains("Invalid cursor theme"));
     }
 
     #[test]
@@ -3027,6 +3592,13 @@ mod tests {
         assert_eq!(frame_period(60), Duration::from_micros(16_666));
     }
 
+    #[test]
+    fn screencast_sampling_matches_the_recording_rate() {
+        assert_eq!(screencast_every_nth_frame(60), 1);
+        assert_eq!(screencast_every_nth_frame(30), 2);
+        assert_eq!(screencast_every_nth_frame(15), 4);
+    }
+
     #[tokio::test]
     async fn test_spawn_ffmpeg_reports_missing_binary() {
         let mut command = tokio::process::Command::new("agent-browser-no-such-ffmpeg");
@@ -3045,7 +3617,7 @@ mod tests {
         assert!(args_str.contains(&"8000k"));
         assert!(args_str.contains(&"18"));
         assert!(args_str.contains(&"image2pipe"));
-        assert!(args_str.contains(&"png"));
+        assert!(args_str.contains(&"mjpeg"));
         assert!(!args_str.contains(&"-use_wallclock_as_timestamps"));
         assert!(args_str.contains(&"vfr"));
     }
@@ -3055,7 +3627,20 @@ mod tests {
         let cmd = build_ffmpeg_command("/tmp/out.mp4", DEFAULT_FPS, false);
         let args: Vec<&std::ffi::OsStr> = cmd.as_std().get_args().collect();
         let args_str: Vec<&str> = args.iter().filter_map(|a| a.to_str()).collect();
-        assert!(args_str.contains(&"libx264"));
+        #[cfg(target_os = "macos")]
+        {
+            assert!(args_str.contains(&"h264_videotoolbox"));
+            assert!(args_str
+                .windows(2)
+                .any(|args| args == ["-q:v", MACOS_H264_RECORDING_QUALITY]));
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert!(args_str.contains(&"libx264"));
+            assert!(args_str
+                .windows(2)
+                .any(|args| args == ["-crf", H264_RECORDING_CRF]));
+        }
         assert!(args_str.contains(&"/tmp/out.mp4"));
     }
 

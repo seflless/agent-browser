@@ -164,7 +164,7 @@ agent-browser mouse up [button]       # Release button
 agent-browser mouse wheel <dy> [dx]   # Scroll wheel
 ```
 
-Use `--human` with `click`, `drag`, or `mouse move` for curved, eased movement from the current cursor position. For `mouse move`, `--duration` sets the target total milliseconds including browser response time, `--steps` sets the number of events, and `--seed` makes the path reproducible. A slow browser can still extend the requested duration.
+Use `--human` with `click`, `drag`, or `mouse move` for seeded, curved movement that starts fast and slows into the target. Cubic ease-out covers 87.5% of forward distance in the first half of the planned duration; the bend decelerates with it to avoid a final sideways hook. Human clicks retain a short settle before pressing. Target size does not affect timing, and ordinary smooth mode retains symmetric slow–fast–slow easing. For `mouse move`, `--duration` sets the target total milliseconds including browser response time, `--steps` sets the number of events, and `--seed` makes the path reproducible. A slow browser can still extend the requested duration.
 
 ## Clipboard
 
@@ -345,6 +345,7 @@ agent-browser profiler stop [path]    # Stop and save profile (.json)
 agent-browser record start <path>     # Start video recording (.webm/.mp4, 30 fps; needs ffmpeg)
 agent-browser record start <path> --fps 60  # Record at 60 fps (--fps accepts 1-60)
 agent-browser record start <path> --cursor  # Include an animated mouse pointer
+agent-browser record start <path> --cursor-icon ./cursor.svg --cursor-scale 2 --cursor-hotspot 4,3 # Large SVG pointer with a precise tip
 agent-browser record start <path> --contact-sheet # Also save a timestamped PNG summary
 agent-browser record start <path> --contact-sheet-threshold 0.02 # Tune changed-frame selection
 agent-browser record stop             # Stop and save video

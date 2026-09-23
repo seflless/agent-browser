@@ -21,7 +21,7 @@ Capture browser automation as video for debugging, documentation, or verificatio
 
 Recording pipes frames into `ffmpeg`, which must be on `PATH` with the `libvpx` and `libx264` encoders. Install it with `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Debian/Ubuntu); `agent-browser doctor` reports it under "Recording". Nothing else in agent-browser needs ffmpeg.
 
-Supported formats are `.webm` (VP8 via libvpx) and `.mp4` (H.264 via libx264). Other extensions are handed to ffmpeg as-is with H.264 video. A path with no extension is rejected before recording starts.
+Supported formats are `.webm` (VP8 via libvpx) and `.mp4` (H.264 via VideoToolbox on macOS, libx264 elsewhere). Other extensions are handed to ffmpeg as-is with H.264 video. A path with no extension is rejected before recording starts.
 
 ## Basic Recording
 
@@ -92,10 +92,18 @@ The video uses the requested frame rate and holds the latest Chrome frame betwee
 
 ## Visible Cursor
 
-Chrome's screencast does not include the native pointer. Pass `--cursor` to add an animated pointer and click ripple rendered with the page, keeping drags synchronized in every captured frame. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it.
+Chrome's screencast does not include the native pointer. Pass `--cursor` to add an animated pointer and translucent filled disk behind it, rendered with the page so drags stay synchronized. Press expands the disk from 16 to 30 CSS-pixel radius over 90 ms; hold stays at 20% opacity; release pulses to 48 px and fades over 200 ms. Quick releases blend from the current press state; stationary holds stop repainting. A device-pixel-ratio-aware canvas keeps the capture damage region stable after drags, avoiding Chromium's cursor-only capture stalls. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it. Validate motion in decoded frames: output FPS metadata alone does not prove that Chrome supplied distinct frames at that rate.
+
+For native Retina recording, launch a fresh Chrome session with `--args '--force-device-scale-factor=2'`, then use `set viewport 1280 800 2` for a 1280×800 logical viewport and 2560×1600 source frames. Emulated DPR alone can leave the actual screencast surface at 1280×800 even though the initial screenshot and encoded output are 2560×1600. Verify raw screencast dimensions rather than inferring source detail from the video container.
 
 ```bash
 agent-browser record start ./walkthrough.webm --cursor
+```
+
+For an oversized, crisp presentation pointer, use one SVG icon for the entire take. `--cursor-hotspot x,y` is the arrow tip in the SVG's unscaled viewBox, so the visible tip remains on the real click point even after scaling:
+
+```bash
+agent-browser record start ./walkthrough.webm --cursor-icon ./large-arrow.svg --cursor-scale 2 --cursor-hotspot 4,3
 ```
 
 ## Contact Sheets
@@ -180,6 +188,26 @@ agent-browser record stop
 ```
 
 ## Best Practices
+
+### Adaptive cursor themes
+
+`record start demo.mp4 --cursor-theme ./theme.json --cursor-scale 0.5` switches the recorded icon using the page's CSS cursor. `record restart` accepts the same options; MCP exposes `cursorTheme`. Theme mode implies `--cursor` and cannot be combined with `--cursor-icon`, `--cursor-hotspot`, or `--cursor-size`. The existing single-icon mode remains fixed.
+
+```json
+{
+  "default": { "icon": "left_ptr.svg", "hotspot": [59, 28] },
+  "pointer": { "icon": "hand2.svg", "hotspot": [67, 30] },
+  "text": { "icon": "xterm.svg", "hotspot": [100, 104] }
+}
+```
+
+`default` is required; omitted pointer/text entries use its image. Paths resolve relative to the JSON file. Every entry requires its own unscaled hotspot, scaled together with its image by `--cursor-scale`. These example coordinates are for the seflless cursor collection, not universal defaults.
+
+Explicit default/pointer/text values win. For auto, editable fields and directly hit selectable characters use text; surrounding padding stays default. A clickable role alone does not imply pointer. Unsupported types use default and none hides the pointer. CSS URL cursors use their final keyword fallback, not image recognition. Open shadow roots are hit-tested; closed shadow trees and browser-native widget details remain best-effort. Styles are rechecked after input and periodically while stationary, without continuously repainting an idle canvas.
+
+For product demos, discover and rehearse first, then record one deterministic `batch --bail` sequence. Do not run an agent loop between recorded steps. Keep app loading outside the take, wait for the actual controls rather than an early editor hook, use short menu/editor settling delays, and verify the final app state after stopping. Output FPS alone is not a smoothness check: validate raw frame dimensions and review cursor motion after large page updates.
+
+The repository's [repeatable-recording playbook](../../../examples/recordings/README.md) includes a runnable Decode 4×3 palette example, seeded motion, single-paragraph label entry, inherited fill checks, Retina source-frame verification, and a take manifest. See also the [capture-stall postmortem](../../../docs/solutions/performance-issues/cursor-stalls-native-recording-20260922.md).
 
 ### 1. Add Pauses for Clarity
 

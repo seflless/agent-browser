@@ -855,7 +855,7 @@ fn tools() -> Vec<Value> {
             json!({
                 "selector": selector_schema(),
                 "newTab": { "type": "boolean", "default": false, "description": "Open link targets in a new tab after applying session setup." },
-                "human": { "type": "boolean", "default": false, "description": "Approach the target with seeded, curved mouse movement." }
+                "human": { "type": "boolean", "default": false, "description": "Approach on a seeded curve with fast-start, slow-arrival cubic easing, then briefly settle before clicking. Target size does not affect timing." }
             }),
             &["selector"],
         ),
@@ -989,7 +989,7 @@ fn parity_tools() -> Vec<Value> {
             TOOL_DRAG,
             "Drag and drop",
             "Drag one element to another.",
-            json!({ "source": selector_schema(), "target": selector_schema(), "human": { "type": "boolean", "default": false, "description": "Use seeded, curved mouse movement." } }),
+            json!({ "source": selector_schema(), "target": selector_schema(), "human": { "type": "boolean", "default": false, "description": "Use seeded, curved movement with fast-start, slow-arrival cubic easing." } }),
             &["source", "target"],
         ),
         tool(
@@ -1121,7 +1121,7 @@ fn parity_tools() -> Vec<Value> {
                 "y": number_schema(),
                 "durationMs": { "type": "integer", "minimum": 0, "description": "Target total movement duration in milliseconds, including browser response time." },
                 "steps": { "type": "integer", "minimum": 1, "maximum": 240, "description": "Number of interpolated events." },
-                "human": { "type": "boolean", "default": false, "description": "Add a seeded perpendicular curve." },
+                "human": { "type": "boolean", "default": false, "description": "Add a seeded curve with cubic ease-out: fast initial travel, then slow precise arrival. Forward motion and bend decelerate together." },
                 "seed": { "type": "integer", "minimum": 0, "description": "Seed for reproducible human movement." }
             }),
             &["x", "y"],
@@ -1382,7 +1382,7 @@ fn parity_tools() -> Vec<Value> {
         tool(
             TOOL_RECORD_START,
             "Record start",
-            "Start video recording of the current active page. Captures 30 fps by default; pass fps up to 60 for motion-heavy takes. Pass url to navigate the active tab there first. Use agent_browser_tab_new beforehand to record in a separate tab.",
+            "Start video recording of the current active page. Targets 30 fps by default; pass fps up to 60 for motion-heavy takes. Output FPS does not guarantee distinct frames from Chrome. A large SVG icon and its hotspot can make the synthetic pointer more legible than the OS cursor; a DPR-aware canvas avoids cursor-only capture stalls after drags. Pass url to navigate the active tab there first. Use agent_browser_tab_new beforehand to record in a separate tab.",
             json!({
                 "path": {
                     "type": "string",
@@ -1395,7 +1395,11 @@ fn parity_tools() -> Vec<Value> {
                     "maximum": crate::native::recording::MAX_FPS,
                     "description": "Capture rate in frames per second (default 30, max 60).",
                 },
-                "cursor": { "type": "boolean", "description": "Render a pointer and click ripple with the page so drags stay synchronized. The inert overlay is hidden from accessibility snapshots, included in screenshots while recording, and removed on stop." },
+                "cursor": { "type": "boolean", "description": "Render a pointer with a translucent filled disk behind it: expand on press, hold steady during dragging, then pulse larger and fade on release. The inert overlay is hidden from accessibility snapshots, included in screenshots while recording, and removed on stop." },
+                "cursorIcon": { "type": "string", "description": "Local SVG icon for the synthetic recording pointer. Implies cursor." },
+                "cursorTheme": { "type": "string", "description": "Local JSON theme with default/pointer/text icons and hotspots. Follows CSS cursors with auto text inference; hides for none. Exclusive with cursorIcon/cursorHotspot; cursorScale applies to all entries." },
+                "cursorScale": { "type": "number", "exclusiveMinimum": 0, "maximum": crate::native::recording::MAX_CURSOR_SCALE, "description": "Scale applied to the icon's intrinsic SVG size (default 1). Implies cursor." },
+                "cursorHotspot": { "type": "array", "items": { "type": "number", "minimum": 0 }, "minItems": 2, "maxItems": 2, "description": "[x, y] pointer location in unscaled SVG coordinates. Defaults to [0, 0] and scales with cursorScale." },
                 "contactSheet": { "type": "boolean", "description": "Export first, changed, and final frames as a timestamped PNG beside the video." },
                 "contactSheetThreshold": { "type": "number", "minimum": 0, "maximum": 1, "description": "Changed-pixel ratio required to select a contact-sheet frame (default 0.05). Implies contactSheet." },
             }),
@@ -1424,7 +1428,11 @@ fn parity_tools() -> Vec<Value> {
                     "maximum": crate::native::recording::MAX_FPS,
                     "description": "Capture rate in frames per second (default 30, max 60).",
                 },
-                "cursor": { "type": "boolean", "description": "Render a pointer and click ripple with the page so drags stay synchronized. The inert overlay is hidden from accessibility snapshots, included in screenshots while recording, and removed on stop." },
+                "cursor": { "type": "boolean", "description": "Render a pointer with a translucent filled disk behind it: expand on press, hold steady during dragging, then pulse larger and fade on release. The inert overlay is hidden from accessibility snapshots, included in screenshots while recording, and removed on stop." },
+                "cursorIcon": { "type": "string", "description": "Local SVG icon for the synthetic recording pointer. Implies cursor." },
+                "cursorTheme": { "type": "string", "description": "Local JSON theme with default/pointer/text icons and hotspots. Follows CSS cursors with auto text inference; hides for none. Exclusive with cursorIcon/cursorHotspot; cursorScale applies to all entries." },
+                "cursorScale": { "type": "number", "exclusiveMinimum": 0, "maximum": crate::native::recording::MAX_CURSOR_SCALE, "description": "Scale applied to the icon's intrinsic SVG size (default 1). Implies cursor." },
+                "cursorHotspot": { "type": "array", "items": { "type": "number", "minimum": 0 }, "minItems": 2, "maxItems": 2, "description": "[x, y] pointer location in unscaled SVG coordinates. Defaults to [0, 0] and scales with cursorScale." },
                 "contactSheet": { "type": "boolean", "description": "Export first, changed, and final frames as a timestamped PNG beside the video." },
                 "contactSheetThreshold": { "type": "number", "minimum": 0, "maximum": 1, "description": "Changed-pixel ratio required to select a contact-sheet frame (default 0.05). Implies contactSheet." },
             }),
@@ -3178,6 +3186,40 @@ fn record_command_args(arguments: &Value, action: &str) -> Result<Vec<String>, P
     if optional_bool(arguments, "cursor")?.unwrap_or(false) {
         args.push("--cursor".to_string());
     }
+    if let Some(cursor_icon) = optional_string(arguments, "cursorIcon")? {
+        args.push("--cursor-icon".to_string());
+        args.push(cursor_icon);
+    }
+    if let Some(theme) = optional_string(arguments, "cursorTheme")? {
+        args.push("--cursor-theme".to_string());
+        args.push(theme);
+    }
+    if let Some(cursor_scale) = optional_number_string(arguments, "cursorScale")? {
+        args.push("--cursor-scale".to_string());
+        args.push(cursor_scale);
+    }
+    if let Some(hotspot) = arguments.get("cursorHotspot") {
+        let values = hotspot
+            .as_array()
+            .filter(|values| values.len() == 2)
+            .ok_or_else(|| ProtocolError::invalid_params("cursorHotspot must be [x, y]"))?;
+        let x = values[0]
+            .as_f64()
+            .ok_or_else(|| ProtocolError::invalid_params("cursorHotspot must be [x, y]"))?;
+        let y = values[1]
+            .as_f64()
+            .ok_or_else(|| ProtocolError::invalid_params("cursorHotspot must be [x, y]"))?;
+        args.push("--cursor-hotspot".to_string());
+        args.push(format!("{x},{y}"));
+    }
+    if let Some(cursor_image) = optional_string(arguments, "cursorImage")? {
+        args.push("--cursor-icon".to_string());
+        args.push(cursor_image);
+    }
+    if let Some(cursor_size) = optional_u64(arguments, "cursorSize")? {
+        args.push("--cursor-size".to_string());
+        args.push(cursor_size.to_string());
+    }
     if optional_bool(arguments, "contactSheet")?.unwrap_or(false) {
         args.push("--contact-sheet".to_string());
     }
@@ -4189,6 +4231,29 @@ mod tests {
     }
 
     #[test]
+    fn recording_cursor_theme_uses_cli_parser() {
+        for operation in ["start", "restart"] {
+            let args = record_command_args(&json!({"path":"theme.mp4", "cursorTheme":"/tmp/my cursors/theme.json", "cursorScale":0.5}), operation).unwrap();
+            let flags = crate::flags::parse_flags(&args);
+            let command = crate::commands::parse_command(&args, &flags).unwrap();
+            assert_eq!(command["cursorTheme"], "/tmp/my cursors/theme.json");
+            assert_eq!(command["cursorScale"], 0.5);
+            assert_eq!(command["cursor"], true);
+            assert_eq!(command["action"], format!("recording_{operation}"));
+            let conflicting = record_command_args(
+                &json!({"path":"theme.mp4", "cursorTheme":"theme.json", "cursorIcon":"arrow.svg"}),
+                operation,
+            )
+            .unwrap();
+            assert!(crate::commands::parse_command(
+                &conflicting,
+                &crate::flags::parse_flags(&conflicting)
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
     fn human_mouse_timing_uses_cli_parser() {
         let args = mouse_move_command_args(&json!({
             "x": 640, "y": 320, "durationMs": 1000,
@@ -4909,6 +4974,16 @@ mod tests {
                 tool["inputSchema"]["properties"]["cursor"]["type"],
                 "boolean"
             );
+            let cursor_scale = &tool["inputSchema"]["properties"]["cursorScale"];
+            assert_eq!(cursor_scale["type"], "number");
+            assert_eq!(
+                cursor_scale["maximum"],
+                json!(crate::native::recording::MAX_CURSOR_SCALE)
+            );
+            assert_eq!(
+                tool["inputSchema"]["properties"]["cursorHotspot"]["minItems"],
+                json!(2)
+            );
             assert_eq!(
                 tool["inputSchema"]["properties"]["contactSheet"]["type"],
                 "boolean"
@@ -4945,6 +5020,29 @@ mod tests {
         assert_eq!(
             record_command_args(&json!({ "path": "demo.webm", "cursor": true }), "start").unwrap(),
             vec!["record", "start", "demo.webm", "--cursor"]
+        );
+        assert_eq!(
+            record_command_args(
+                &json!({
+                    "path": "demo.webm",
+                    "cursorIcon": "./large-arrow.svg",
+                    "cursorScale": 2,
+                    "cursorHotspot": [4, 3]
+                }),
+                "start"
+            )
+            .unwrap(),
+            vec![
+                "record",
+                "start",
+                "demo.webm",
+                "--cursor-icon",
+                "./large-arrow.svg",
+                "--cursor-scale",
+                "2",
+                "--cursor-hotspot",
+                "4,3"
+            ]
         );
         assert_eq!(
             record_command_args(

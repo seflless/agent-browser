@@ -321,7 +321,7 @@ agent-browser mouse up [button]       # Release button
 agent-browser mouse wheel <dy> [dx]   # Scroll wheel
 ```
 
-Add `--human` to `click` or `drag` for curved, eased movement from the current cursor position. For timed mouse moves, `--duration` is the target total duration, including browser response time; a slow browser can still extend it.
+Add `--human` to `click`, `drag`, or `mouse move` for curved movement that starts fast and slows into the target. Cubic ease-out covers 87.5% of the forward distance in the first half, leaving the second half for a precise approach. The bend slows with the forward movement, avoiding a sideways hook at arrival. Human clicks keep their brief settle before pressing; target size does not affect timing. Ordinary smooth mode retains symmetric slow–fast–slow easing. For timed mouse moves, `--duration` is the target total duration, including browser response time; a slow browser can still extend it.
 
 ### Browser Settings
 
@@ -447,6 +447,7 @@ agent-browser profiler stop [path]    # Stop and save profile (.json)
 agent-browser record start ./demo.webm           # Start video recording at 30 fps (.webm or .mp4; needs ffmpeg on PATH)
 agent-browser record start ./demo.webm --fps 60  # 60 fps for motion-heavy takes (1-60 allowed)
 agent-browser record start ./demo.webm --cursor  # Include an animated pointer
+agent-browser record start ./demo.webm --cursor-icon ./cursor.svg --cursor-scale 2 --cursor-hotspot 4,3 # Large SVG pointer with a precise tip
 agent-browser record start ./demo.webm --contact-sheet # Save a PNG with distinct changed areas
 agent-browser record stop                        # Stop and save the video
 agent-browser record restart ./take2.webm        # Stop the current recording, start a new one
@@ -467,7 +468,13 @@ agent-browser state clear --all       # Clear all saved states
 agent-browser state clean --older-than <days>  # Delete old states
 ```
 
-With recording `--cursor`, the pointer and click ripple render with the page, keeping drags synchronized in every captured frame. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it.
+With recording `--cursor`, the pointer and translucent filled-disk feedback render with the page, keeping drags synchronized in every captured frame. The disk stays behind the icon: expand from 16 to 30 CSS-pixel radius over 90 ms, hold at 20% opacity while pressed, then pulse to 48 px and fade over 200 ms on release. A device-pixel-ratio-aware canvas keeps the capture damage region stable when the pointer moves away after a drag, avoiding Chromium's cursor-only capture stalls. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it. The requested recording frame rate is an output target, not a guarantee that Chrome supplies that many distinct frames.
+
+For a legible presentation cursor, pass `--cursor-icon` with a local SVG. Use `--cursor-hotspot x,y` to anchor its tip in the SVG's unscaled viewBox; `--cursor-scale` enlarges both the icon and hotspot without any operating-system cursor limit.
+
+For repeatable demos, see the [product-recording playbook and deterministic 4×3 color-grid example](examples/recordings/README.md). It covers native Retina capture, pacing, text entry, cursor verification, and the [capture-stall investigation](docs/solutions/performance-issues/cursor-stalls-native-recording-20260922.md).
+
+Use `record start demo.mp4 --cursor-theme ./theme.json --cursor-scale 0.5` to automatically switch between custom `default`, `pointer`, and `text` icons. The [theme format and runnable demo](examples/recordings/README.md#adaptive-cursor-themes) include per-icon hotspots. Explicit CSS is honored; `auto` uses conservative text hit-testing, unsupported types fall back to the arrow, and `none` hides the cursor. The existing single `--cursor-icon` behavior is unchanged.
 
 ### Navigation
 

@@ -142,7 +142,7 @@ For sessions that handle sensitive data, use `--allowed-domains` to restrict nav
 ```bash
 agent-browser click @e1                   # click
 agent-browser click @e1 --new-tab         # open link in new tab instead of navigating
-agent-browser click @e1 --human           # approach with reproducible curved movement
+agent-browser click @e1 --human           # fast departure, slow arrival, then settle/click
 agent-browser dblclick @e1                # double-click
 agent-browser hover @e1                   # hover
 agent-browser focus @e1                   # focus (useful before keyboard input)
@@ -158,7 +158,7 @@ agent-browser upload @e5 file1.pdf        # upload file(s)
 agent-browser scroll down 500             # scroll page (up/down/left/right)
 agent-browser scrollintoview @e1          # scroll element into view
 agent-browser drag @e1 @e2                # drag and drop
-agent-browser drag @e1 @e2 --human        # drag with curved, eased movement
+agent-browser drag @e1 @e2 --human        # seeded curve with fast-start, slow-arrival easing
 ```
 
 ### When refs don't work or you don't want to snapshot
@@ -386,7 +386,7 @@ agent-browser click @e3
 agent-browser record stop
 ```
 
-Recording uses the active tab. Use `--cursor` for an animated pointer, `--contact-sheet` for a visual summary, and `--fps 60` for motion-heavy recordings. The cursor renders with the page so drags stay synchronized. Its inert overlay is hidden from accessibility snapshots, included in screenshots while recording, and removed on stop.
+Recording uses the active tab. Use `--cursor` for an animated pointer, `--contact-sheet` for a visual summary, and `--fps 60` for motion-heavy recordings. For a larger presentation cursor, use `--cursor-icon ./cursor.svg --cursor-scale 2 --cursor-hotspot 4,3`; the hotspot is in unscaled SVG coordinates and stays fixed on the real click point. For adaptive icons, use `--cursor-theme ./theme.json --cursor-scale 0.5`: map CSS default/pointer/text to images with individual hotspots, infer text for auto, fall back to default for unsupported types, and hide on none. See the recording reference for the JSON format. A filled translucent disk behind the icon expands on press, holds steady while dragging, then pulses larger and fades on release. The cursor renders with the page so drags stay synchronized. Its inert overlay is hidden from accessibility snapshots, included in screenshots while recording, and removed on stop.
 
 See [references/video-recording.md](references/video-recording.md) for frame rate guidance, codec options, and more.
 

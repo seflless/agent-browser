@@ -12,7 +12,7 @@ sudo apt install ffmpeg    # Debian/Ubuntu
 agent-browser doctor       # reports ffmpeg and its encoders under "Recording"
 ```
 
-The supported formats are `.webm` (VP8 via libvpx) and `.mp4` (H.264 via libx264). Any other extension is handed to ffmpeg as-is with H.264 video, so `.mkv` or `.mov` work if ffmpeg knows the container. A path with no extension is rejected before recording starts, since ffmpeg would have nothing to pick a container from. Nothing else in agent-browser needs ffmpeg.
+The supported formats are `.webm` (VP8 via libvpx) and `.mp4` (H.264 via VideoToolbox on macOS, libx264 elsewhere). Any other extension is handed to ffmpeg as-is with H.264 video, so `.mkv` or `.mov` work if ffmpeg knows the container. A path with no extension is rejected before recording starts, since ffmpeg would have nothing to pick a container from. Nothing else in agent-browser needs ffmpeg.
 
 ## Basic workflow
 
@@ -43,11 +43,41 @@ agent-browser record start ./demo.webm
 
 ## Visible cursor
 
-Chrome recordings do not normally include the native pointer. Add `--cursor` for an animated pointer and click ripple rendered with the page, keeping drags synchronized in every captured frame. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it:
+Chrome recordings do not normally include the native pointer. Add `--cursor` for an animated pointer and a filled translucent disk behind it. Press expands the disk from 16 to 30 CSS-pixel radius over 90 ms; holding keeps it steady at 20% opacity; release pulses to 48 px and fades over 200 ms. Quick clicks release smoothly from the unfinished press animation. The overlay renders with the page, keeping drags synchronized in every captured frame. A device-pixel-ratio-aware canvas keeps the capture damage region stable after drags, avoiding Chromium's cursor-only capture stalls. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it. The requested FPS is an output target; encoded FPS metadata does not guarantee that Chrome supplied that many distinct frames:
 
 ```bash
 agent-browser record start ./walkthrough.webm --cursor
 ```
+
+For a larger presentation pointer, set one SVG icon for the recording. `--cursor-hotspot x,y` anchors the arrow tip in the SVG's unscaled viewBox, and `--cursor-scale` enlarges both the icon and that hotspot without an OS cursor limit:
+
+```bash
+agent-browser record start ./walkthrough.webm --cursor-icon ./large-arrow.svg --cursor-scale 2 --cursor-hotspot 4,3
+```
+
+## Repeatable product demos
+
+### Adaptive cursor themes
+
+Use `--cursor-theme ./theme.json --cursor-scale 0.5` instead of `--cursor-icon` to follow the page's CSS cursor automatically:
+
+```json
+{
+  "default": { "icon": "left_ptr.svg", "hotspot": [59, 28] },
+  "pointer": { "icon": "hand2.svg", "hotspot": [67, 30] },
+  "text": { "icon": "xterm.svg", "hotspot": [100, 104] }
+}
+```
+
+The default entry is required; pointer and text are optional. Each icon path is relative to the theme file, each hotspot is in that icon's unscaled coordinates, and the shared scale applies to both. These coordinates match the example assets, not arbitrary icons. Theme mode implies a visible recording cursor and is exclusive with the single-icon/hotspot/size flags.
+
+Explicit CSS default/pointer/text is respected. For auto, text inputs, editable areas, and directly hit selectable text use the I-beam; empty padding stays an arrow. Unsupported types fall back to default; none hides the pointer. CSS URL cursors use their final keyword fallback. Native widget internals and closed shadow trees cannot be perfectly inferred from page styles. Stationary style changes are also detected, with no continuous idle repaint.
+
+Use an agent to discover and rehearse the UI, then run the take as one deterministic `batch --bail` script. Start capture only after the actual controls are ready; keep authentication, loading, screenshots, and assertions outside the take. Short target and menu settling delays make actions readable without multi-second gaps between commands.
+
+For Retina detail without tiny UI, launch a fresh Chrome session with `--args '--force-device-scale-factor=2'`, then use `set viewport 1280 800 2`. Verify that raw screencast frames are actually 2560×1600: emulated DPR or video-container dimensions alone can hide an upscaled source. Likewise, 60 fps output can contain held frames if Chrome delivers fewer updates.
+
+This fork includes a [recording playbook and deterministic 4×3 palette demo](https://github.com/seflless/agent-browser/tree/feat/custom-recording-cursor/examples/recordings), with a source-resolution probe and postflight assertions. The [capture-stall investigation](https://github.com/seflless/agent-browser/blob/feat/custom-recording-cursor/docs/solutions/performance-issues/cursor-stalls-native-recording-20260922.md) explains why cursor rendering uses a stable canvas surface during capture, rather than moving DOM images or post-processing.
 
 ## Contact sheets
 
@@ -98,9 +128,9 @@ Valid rates are 1 to 60. The latest Chrome frame is held between repaints so the
     <tr><th>Command</th><th>Description</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>record start &lt;path.webm|path.mp4&gt; [url] [--fps &lt;n&gt;] [--cursor] [--contact-sheet]</code></td><td>Start recording the active page; a URL navigates the active tab first</td></tr>
+    <tr><td><code>record start &lt;path.webm|path.mp4&gt; [url] [--fps &lt;n&gt;] [--cursor] [--cursor-icon &lt;svg&gt;] [--cursor-scale &lt;factor&gt;] [--cursor-hotspot &lt;x,y&gt;] [--contact-sheet]</code></td><td>Start recording the active page; a URL navigates the active tab first</td></tr>
     <tr><td><code>record stop</code></td><td>Stop the active recording and save the file</td></tr>
-    <tr><td><code>record restart &lt;path.webm|path.mp4&gt; [url] [--fps &lt;n&gt;] [--cursor] [--contact-sheet]</code></td><td>Stop the current recording and immediately start another</td></tr>
+    <tr><td><code>record restart &lt;path.webm|path.mp4&gt; [url] [--fps &lt;n&gt;] [--cursor] [--cursor-icon &lt;svg&gt;] [--cursor-scale &lt;factor&gt;] [--cursor-hotspot &lt;x,y&gt;] [--contact-sheet]</code></td><td>Stop the current recording and immediately start another</td></tr>
   </tbody>
 </table>
 

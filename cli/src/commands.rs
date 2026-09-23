@@ -1741,7 +1741,7 @@ fn parse_command_inner(args: &[String], flags: &Flags) -> Result<Value, ParseErr
                     "recording_start",
                     &rest[1..],
                     "record start",
-                    "record start <output.webm|output.mp4> [url] [--fps <n>] [--cursor] [--contact-sheet] [--contact-sheet-threshold <0-1>]",
+                    "record start <output.webm|output.mp4> [url] [--fps <n>] [--cursor] [--cursor-icon <path>|--cursor-theme <json>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet] [--contact-sheet-threshold <0-1>]",
                 ),
                 Some("stop") => Ok(json!({ "id": id, "action": "recording_stop" })),
                 Some("restart") => parse_record_take(
@@ -1749,7 +1749,7 @@ fn parse_command_inner(args: &[String], flags: &Flags) -> Result<Value, ParseErr
                     "recording_restart",
                     &rest[1..],
                     "record restart",
-                    "record restart <output.webm|output.mp4> [url] [--fps <n>] [--cursor] [--contact-sheet] [--contact-sheet-threshold <0-1>]",
+                    "record restart <output.webm|output.mp4> [url] [--fps <n>] [--cursor] [--cursor-icon <path>|--cursor-theme <json>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet] [--contact-sheet-threshold <0-1>]",
                 ),
                 Some(sub) => Err(ParseError::UnknownSubcommand {
                     subcommand: sub.to_string(),
@@ -2400,7 +2400,7 @@ fn parse_read(rest: &[&str], id: &str, flags: &Flags) -> Result<Value, ParseErro
 }
 
 /// Parse the arguments shared by `record start` and `record restart`:
-/// `<path> [url] [--fps <n>] [--cursor] [--contact-sheet]` plus an optional
+/// `<path> [url] [--fps <n>] [--cursor] [--cursor-icon <path>|--cursor-theme <json>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet]` plus an optional
 /// contact-sheet pixel-difference threshold.
 ///
 /// `rest` excludes the subcommand. `path` needs an extension so ffmpeg can
@@ -2420,6 +2420,11 @@ fn parse_record_take(
     let mut url: Option<&str> = None;
     let mut fps: Option<u32> = None;
     let mut cursor = false;
+    let mut cursor_image: Option<&str> = None;
+    let mut cursor_theme: Option<&str> = None;
+    let mut cursor_scale: Option<f64> = None;
+    let mut cursor_hotspot: Option<(f64, f64)> = None;
+    let mut cursor_size: Option<u32> = None;
     let mut contact_sheet = false;
     let mut contact_sheet_threshold: Option<f64> = None;
 
@@ -2452,6 +2457,92 @@ fn parse_record_take(
             "--cursor" => {
                 cursor = true;
                 i += 1;
+            }
+            "--cursor-icon" | "--cursor-image" => {
+                let value = rest
+                    .get(i + 1)
+                    .ok_or_else(|| ParseError::MissingArguments {
+                        context: format!("{} --cursor-icon", context),
+                        usage,
+                    })?;
+                cursor_image = Some(value);
+                cursor = true;
+                i += 2;
+            }
+            "--cursor-theme" => {
+                cursor_theme =
+                    Some(
+                        rest.get(i + 1)
+                            .ok_or_else(|| ParseError::MissingArguments {
+                                context: format!("{} --cursor-theme", context),
+                                usage,
+                            })?,
+                    );
+                cursor = true;
+                i += 2;
+            }
+            "--cursor-scale" => {
+                let value = rest
+                    .get(i + 1)
+                    .ok_or_else(|| ParseError::MissingArguments {
+                        context: format!("{} --cursor-scale", context),
+                        usage,
+                    })?;
+                let parsed = value.parse::<f64>().map_err(|_| ParseError::InvalidValue {
+                    message: format!("Invalid cursor scale: '{}' is not a number", value),
+                    usage,
+                })?;
+                crate::native::recording::validate_cursor_scale(parsed)
+                    .map_err(|message| ParseError::InvalidValue { message, usage })?;
+                cursor_scale = Some(parsed);
+                cursor = true;
+                i += 2;
+            }
+            "--cursor-hotspot" => {
+                let value = rest
+                    .get(i + 1)
+                    .ok_or_else(|| ParseError::MissingArguments {
+                        context: format!("{} --cursor-hotspot", context),
+                        usage,
+                    })?;
+                let Some((x, y)) = value.split_once(',') else {
+                    return Err(ParseError::InvalidValue {
+                        message: format!("Invalid cursor hotspot: '{}' must use x,y", value),
+                        usage,
+                    });
+                };
+                let hotspot = crate::native::recording::CursorHotspot {
+                    x: x.parse::<f64>().map_err(|_| ParseError::InvalidValue {
+                        message: format!("Invalid cursor hotspot: '{}' must use x,y", value),
+                        usage,
+                    })?,
+                    y: y.parse::<f64>().map_err(|_| ParseError::InvalidValue {
+                        message: format!("Invalid cursor hotspot: '{}' must use x,y", value),
+                        usage,
+                    })?,
+                };
+                crate::native::recording::validate_cursor_hotspot(hotspot)
+                    .map_err(|message| ParseError::InvalidValue { message, usage })?;
+                cursor_hotspot = Some((hotspot.x, hotspot.y));
+                cursor = true;
+                i += 2;
+            }
+            "--cursor-size" => {
+                let value = rest
+                    .get(i + 1)
+                    .ok_or_else(|| ParseError::MissingArguments {
+                        context: format!("{} --cursor-size", context),
+                        usage,
+                    })?;
+                let parsed = value.parse::<u32>().map_err(|_| ParseError::InvalidValue {
+                    message: format!("Invalid cursor size: '{}' is not a valid integer", value),
+                    usage,
+                })?;
+                crate::native::recording::validate_cursor_size(parsed)
+                    .map_err(|message| ParseError::InvalidValue { message, usage })?;
+                cursor_size = Some(parsed);
+                cursor = true;
+                i += 2;
             }
             "--contact-sheet" => {
                 contact_sheet = true;
@@ -2526,6 +2617,26 @@ fn parse_record_take(
     }
     if cursor {
         cmd["cursor"] = json!(true);
+    }
+    if let Some(image) = cursor_image {
+        cmd["cursorIcon"] = json!(image);
+    }
+    if let Some(theme) = cursor_theme {
+        if cursor_image.is_some() || cursor_hotspot.is_some() || cursor_size.is_some() {
+            return Err(ParseError::InvalidValue {
+                message: "--cursor-theme cannot be combined with --cursor-icon, --cursor-hotspot, or --cursor-size".into(), usage,
+            });
+        }
+        cmd["cursorTheme"] = json!(theme);
+    }
+    if let Some(scale) = cursor_scale {
+        cmd["cursorScale"] = json!(scale);
+    }
+    if let Some((x, y)) = cursor_hotspot {
+        cmd["cursorHotspot"] = json!([x, y]);
+    }
+    if let Some(size) = cursor_size {
+        cmd["cursorSize"] = json!(size);
     }
     if contact_sheet {
         cmd["contactSheet"] = json!(true);
@@ -5086,6 +5197,43 @@ mod tests {
             parse_command(&args("record start output.webm --cursor"), &default_flags()).unwrap();
         assert_eq!(cmd["action"], "recording_start");
         assert_eq!(cmd["cursor"], true);
+    }
+
+    #[test]
+    fn test_record_start_with_custom_cursor() {
+        let cmd = parse_command(
+            &args("record start output.webm --cursor-icon ./large-arrow.svg --cursor-scale 2 --cursor-hotspot 4,3"),
+            &default_flags(),
+        )
+        .unwrap();
+        assert_eq!(cmd["cursor"], true);
+        assert_eq!(cmd["cursorIcon"], "./large-arrow.svg");
+        assert_eq!(cmd["cursorScale"], 2.0);
+        assert_eq!(cmd["cursorHotspot"], json!([4.0, 3.0]));
+    }
+
+    #[test]
+    fn test_record_start_rejects_invalid_cursor_hotspot() {
+        for value in ["4", "-1,3", "left,top"] {
+            let result = parse_command(
+                &args(&format!(
+                    "record start output.webm --cursor-hotspot {value}"
+                )),
+                &default_flags(),
+            );
+            assert!(result.is_err(), "{value} should be rejected");
+        }
+    }
+
+    #[test]
+    fn test_record_start_rejects_invalid_cursor_size() {
+        for value in ["0", "513", "large"] {
+            let result = parse_command(
+                &args(&format!("record start output.webm --cursor-size {value}")),
+                &default_flags(),
+            );
+            assert!(result.is_err(), "{value} should be rejected");
+        }
     }
 
     #[test]

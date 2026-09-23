@@ -164,7 +164,7 @@ agent-browser mouse up left           # Release button
 agent-browser mouse wheel 100         # Scroll wheel
 ```
 
-Use `--human` with `click` or `drag` when pointer-path events matter. Movement starts at the current cursor position and ends at the target; `mouse move --seed` makes the path reproducible. `--duration` is the target total duration, including browser response time; a slow browser can still extend it.
+Use `--human` with `click`, `drag`, or `mouse move` when pointer-path events matter. Human movement starts fast, then uses cubic ease-out to slow into the exact target: 87.5% of forward distance in the first half of the planned duration. The curve's sideways bend slows too. Human clicks briefly settle before pressing; target size does not affect timing. Ordinary smooth mode remains symmetric slow–fast–slow. `mouse move --seed` makes the path reproducible. `--duration` is the target total duration, including browser response time; a slow browser can still extend it.
 
 ## Semantic Locators (alternative to refs)
 
