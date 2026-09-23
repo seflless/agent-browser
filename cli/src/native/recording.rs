@@ -288,6 +288,7 @@ pub struct RecordingCursorStyle {
     hotspot_x: f64,
     hotspot_y: f64,
     overlay_data_url: Option<String>,
+    theme: Option<Value>,
 }
 
 /// The pointer location inside a custom cursor icon, measured in the icon's
@@ -310,12 +311,16 @@ impl Default for RecordingCursorStyle {
             hotspot_x: 0.0,
             hotspot_y: 0.0,
             overlay_data_url: None,
+            theme: None,
         }
     }
 }
 
 impl RecordingCursorStyle {
     fn from_options(options: &RecordingOptions) -> Result<Self, String> {
+        if let Some(path) = &options.cursor_theme {
+            return Self::from_theme(path, options);
+        }
         let scale = validate_cursor_scale(options.cursor_scale.unwrap_or(1.0))?;
         let Some(path) = options.cursor_image.as_deref() else {
             if options.cursor_hotspot.is_some() {
@@ -367,7 +372,57 @@ impl RecordingCursorStyle {
             hotspot_x: hotspot.x * output_scale,
             hotspot_y: hotspot.y * output_scale,
             overlay_data_url: Some(overlay_data_url),
+            theme: None,
         })
+    }
+
+    /// Resolve a local theme once, before capture. All images and hotspots are
+    /// embedded in the isolated overlay; switching never performs file IO.
+    fn from_theme(path: &str, options: &RecordingOptions) -> Result<Self, String> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Icon {
+            icon: String,
+            hotspot: [f64; 2],
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Theme {
+            default: Icon,
+            pointer: Option<Icon>,
+            text: Option<Icon>,
+        }
+        if options.cursor_image.is_some()
+            || options.cursor_hotspot.is_some()
+            || options.cursor_size.is_some()
+        {
+            return Err("--cursor-theme cannot be combined with --cursor-icon, --cursor-hotspot, or --cursor-size; use each theme entry's icon and hotspot".into());
+        }
+        let contents = fs::read_to_string(path)
+            .map_err(|e| format!("Unable to read cursor theme {path}: {e}"))?;
+        let theme: Theme = serde_json::from_str(&contents)
+            .map_err(|e| format!("Invalid cursor theme {path}: {e}"))?;
+        let directory = Path::new(path).parent().unwrap_or_else(|| Path::new("."));
+        let load = |icon: Icon| {
+            Self::from_options(&RecordingOptions {
+                cursor_image: Some(directory.join(icon.icon).to_string_lossy().into_owned()),
+                cursor_scale: options.cursor_scale,
+                cursor_hotspot: Some(CursorHotspot {
+                    x: icon.hotspot[0],
+                    y: icon.hotspot[1],
+                }),
+                ..Default::default()
+            })
+        };
+        let mut style = load(theme.default)?;
+        let mut variants = json!({ "default": style.overlay_config() });
+        for (name, icon) in [("pointer", theme.pointer), ("text", theme.text)] {
+            if let Some(icon) = icon {
+                variants[name] = load(icon)?.overlay_config();
+            }
+        }
+        style.theme = Some(variants);
+        Ok(style)
     }
 
     fn image_for(&self, pressed: bool) -> Option<&image::RgbaImage> {
@@ -386,6 +441,7 @@ impl RecordingCursorStyle {
             "hotspotX": self.hotspot_x,
             "hotspotY": self.hotspot_y,
             "imageDataUrl": self.overlay_data_url,
+            "theme": self.theme,
         })
     }
 }
@@ -931,6 +987,8 @@ pub struct RecordingOptions {
     pub cursor: bool,
     /// Local SVG, PNG, JPEG, or WebP file used for the recording pointer.
     pub cursor_image: Option<String>,
+    /// Local JSON mapping default/pointer/text to icons and unscaled hotspots.
+    pub cursor_theme: Option<String>,
     /// Enlarges the custom cursor's intrinsic size, or the built-in pointer.
     pub cursor_scale: Option<f64>,
     /// Pointer location within a custom icon, in its unscaled coordinates.
@@ -947,6 +1005,7 @@ impl Default for RecordingOptions {
             fps: None,
             cursor: false,
             cursor_image: None,
+            cursor_theme: None,
             cursor_scale: None,
             cursor_hotspot: None,
             cursor_size: None,
@@ -1008,6 +1067,7 @@ pub fn recording_start(
     let threshold = validate_contact_sheet_threshold(options.contact_sheet_threshold)?;
     let cursor_style = RecordingCursorStyle::from_options(&options)?;
     let cursor_enabled = options.cursor
+        || options.cursor_theme.is_some()
         || options.cursor_image.is_some()
         || options.cursor_scale.is_some()
         || options.cursor_hotspot.is_some()
@@ -1037,6 +1097,7 @@ pub fn recording_start(
         "fps": fps,
         "cursor": cursor_enabled,
         "cursorIcon": options.cursor_image,
+        "cursorTheme": options.cursor_theme,
         "cursorScale": options.cursor_scale.unwrap_or(1.0),
         "cursorHotspot": options.cursor_hotspot.map(|hotspot| json!([hotspot.x, hotspot.y])),
         "cursorSize": state.cursor_style.size,
@@ -2025,6 +2086,8 @@ pub async fn capture_initial_image(
     })
 }
 
+// Keep the task's independent channels and cancellation signal explicit.
+#[allow(clippy::too_many_arguments)]
 async fn collect_frames(
     client: &CdpClient,
     capture_session: &str,
@@ -2932,6 +2995,53 @@ mod tests {
             .overlay_data_url
             .as_deref()
             .is_some_and(|url| url.starts_with("data:image/svg+xml;base64,")));
+    }
+
+    #[test]
+    fn cursor_theme_loads_relative_icons_and_validates_entries() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("arrow.svg"), r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><path d="M0 0h20v20z"/></svg>"#).unwrap();
+        let path = directory.path().join("theme.json");
+        let mut theme = json!({"default":{"icon":"arrow.svg","hotspot":[2,3]},"pointer":{"icon":"arrow.svg","hotspot":[5,6]},"text":{"icon":"arrow.svg","hotspot":[10,10]}});
+        fs::write(&path, theme.to_string()).unwrap();
+        let options = RecordingOptions {
+            cursor_theme: Some(path.to_string_lossy().into_owned()),
+            cursor_scale: Some(2.0),
+            ..Default::default()
+        };
+        let config = RecordingCursorStyle::from_options(&options)
+            .unwrap()
+            .overlay_config();
+        assert_eq!(config["theme"]["default"]["hotspotX"], 4.0);
+        assert_eq!(config["theme"]["pointer"]["hotspotY"], 12.0);
+        assert_eq!(config["theme"]["text"]["width"], 40);
+        assert!(config["theme"]["pointer"]["imageDataUrl"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:"));
+        let mut conflict = options.clone();
+        conflict.cursor_image = Some("arrow.svg".into());
+        assert!(RecordingCursorStyle::from_options(&conflict)
+            .unwrap_err()
+            .contains("cannot be combined"));
+        theme["text"]["hotspot"] = json!([50, 10]);
+        fs::write(&path, theme.to_string()).unwrap();
+        assert!(RecordingCursorStyle::from_options(&options)
+            .unwrap_err()
+            .contains("outside"));
+        theme.as_object_mut().unwrap().remove("text");
+        theme.as_object_mut().unwrap().remove("pointer");
+        fs::write(&path, theme.to_string()).unwrap();
+        assert!(RecordingCursorStyle::from_options(&options).is_ok());
+        theme.as_object_mut().unwrap().remove("default");
+        fs::write(&path, theme.to_string()).unwrap();
+        assert!(RecordingCursorStyle::from_options(&options)
+            .unwrap_err()
+            .contains("default"));
+        fs::write(&path, "not json").unwrap();
+        assert!(RecordingCursorStyle::from_options(&options)
+            .unwrap_err()
+            .contains("Invalid cursor theme"));
     }
 
     #[test]

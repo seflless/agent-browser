@@ -57,12 +57,34 @@ node --test examples/recordings/decode-color-grid.test.mjs
 
 Each take gets `.commands.json`, `.commands-result.json`, `.manifest.json`, and `.png` sidecars. The manifest records viewport, real source dimensions, Chrome version, output metadata, cursor checksum/settings, and verified shape state. The output MP4 is never silently overwritten. Keep the script, cursor asset, fork commit, app revision, and sidecars together for reproducibility; do not commit cookies, auth state, or private board data.
 
+## Adaptive cursor themes
+
+Use `--cursor-theme theme.json` to replace CSS default/pointer/text with your SVGs. Copy [cursor-theme.example.json](cursor-theme.example.json) into a folder containing `left_ptr.svg`, `hand2.svg`, and `xterm.svg` from the [shared cursor collection](https://github.com/seflless/seflless.com/tree/main/public/cursors). The example includes the tested per-icon hotspots; the SVGs themselves are not vendored here. Keep their provenance/license with any redistributed assets.
+
+```bash
+node examples/recordings/cursor-theme-demo.mjs \
+  --theme /absolute/path/to/cursors/theme.json \
+  --verify \
+  --output /absolute/path/to/takes/cursor-theme-01.mp4
+```
+
+The script serves a local fixture, runs browser assertions before the take, then records one deterministic batch at native DPR 2 / 60 fps with scale 0.4. It checks explicit styles, an auto text field, selectable glyphs versus padding, unsupported-type fallback, none, and stationary CSS changes. Verification produces a separate `.checks.mp4` and stills so diagnostic pauses are never included in the demonstration. The demonstration and command/result sidecars are saved beside the requested output. Existing takes are not overwritten.
+
+The take also drag-selects the complete sample sentence and drags a card into a highlighted drop target using actual mouse down/move/up events. Geometry is measured before capture; no selection or drop is synthesized through an editor API. After capture, `.verification.json` checks the selected sentence and the card's actual destination, and `.final.png` preserves the finished state. The page uses pointer-based drag/drop with grab/grabbing CSS, which currently use the theme's default-image fallback; dedicated grab cursors are intentionally deferred.
+
+Theme images are loaded at recording start and switched on the same stable canvas. CSS lookup uses the actual input location, not the visually eased pointer. Explicit styles take precedence; auto text detection requires an editable field or an actual character hit, not merely a large container with text somewhere inside. Unsupported styles use default, none hides the pointer, and missing pointer/text assets reuse the default image. A lightweight stationary check notices keyboard/menu/style changes, redrawing only when the type changes.
+
+Known limits: CSS auto is an approximation of browser behavior, custom CSS image cursors use their final keyword fallback, and closed shadow roots/native widget details are not fully inspectable. Keep the original single-icon option when a fixed presentation pointer is desired.
+
 ## Pacing rules
+
+For interactive feedback/timing experiments, see [Pointer Lab](cursor-workbench/README.md). It uses Dialkit, a seekable mouse-event timeline, three feedback presets, portable preset JSON, CLI gesture export, and a dense function/asset reference. Its recommended Soft disk preset is now the recorder default. Further workbench edits remain previews and are not applied automatically.
 
 - Discover menus/selectors and inspect screenshots before the take. Record with a single `batch --bail` call; do not pause for an agent to decide each action.
 - Use semantic selectors for controls. The CLI computes their hit targets; use fixed coordinates only for canvas gestures in a verified fixed viewport.
 - Seed curved paths so rehearsals are repeatable. Use explicit durations and step counts where the gesture matters. The current CDP dispatch loop awaits acknowledgements, so durations are targets, not hard wall-clock guarantees. Requesting 120 samples/second does not prove that Chrome delivers 120 input events/second.
 - Human clicks include movement and a short settle before clicking. Add only small, justified waits: about 90 ms before a manual mouse-down, 100 ms after entering a text editor, and 120 ms for a menu to open. Avoid arbitrary multi-second waits between rectangles or menus.
+- Human moves now use cubic ease-out: fast departure, progressively slower aiming, and an exact endpoint. Both forward travel and the sideways bend share that easing. The palette and cursor-theme scripts already use `--human`, so they inherit it without changing their action lists or durations. Target-size-based timing is intentionally not implemented.
 - After creating a rectangle or arrow, Decode automatically returns to Select. Do not click Select again.
 - For shape labels use `keydown Enter`, `keyup Enter`, a 100 ms editor settle, Select All inside the editor, `keyboard inserttext`, then Escape. This replaces the initial paragraph and avoids the earlier leading-newline/vertical-centering bug. Select All must happen after text editing starts.
 - Set a persistent style once when it should be inherited. Postflight must check that inheritance actually happened instead of adding unnecessary menu actions to every shape.
@@ -70,7 +92,7 @@ Each take gets `.commands.json`, `.commands-result.json`, `.manifest.json`, and 
 
 ## What makes the recording smooth
 
-The cursor and click ripple are rendered **during capture**, not composited onto the finished movie. A closed, inert shadow root contains one DPR-aware canvas. A stable damage region prevents Chromium's capture sampler from dropping cursor-only frames after a large canvas update. The main cursor uses elapsed-time smoothing during free motion; during dragging it follows the input point exactly so it does not lag behind the shape. A low-opacity, fixed-blur trail softens motion without replacing missing frames. Idle animation stops, and the overlay is removed when recording stops.
+The cursor and filled feedback disk are rendered **during capture**, not composited onto the finished movie. The disk stays behind the icon, expands on press, holds at 30 CSS-pixel radius / 20% opacity, then pulses larger and fades on release. A closed, inert shadow root contains one DPR-aware canvas. A stable damage region prevents Chromium's capture sampler from dropping cursor-only frames after a large canvas update. The main cursor uses elapsed-time smoothing during free motion; during dragging it follows the input point exactly so it does not lag behind the shape. A low-opacity, fixed-blur trail softens motion without replacing missing frames. Idle and stationary-held animation stops, and the overlay is removed when recording stops.
 
 The recorder acknowledges Chrome frames independently of the encoder and produces the requested output frame rate by holding the latest available page frame. On macOS, MP4 encoding uses VideoToolbox; other platforms use libx264. Thus `60/1` in ffprobe is necessary but not sufficient evidence of smooth capture.
 
@@ -91,3 +113,9 @@ ffprobe -v error -show_entries stream=width,height,r_frame_rate,nb_frames \
 ```
 
 See the [capture-stall investigation](../../docs/solutions/performance-issues/cursor-stalls-native-recording-20260922.md) for failed approaches, evidence, and Chromium source references.
+
+## Deferred follow-ups
+
+- Extract the injected cursor renderer, motion model and assets into a standalone script/npm library, with optional automation adapters and a companion recording skill. The current implementation remains agent-browser-specific; no standalone package or hosted asset service is shipped here.
+- Add a custom move cursor and update the drag/drop fixture to use CSS `move`. Current themes support default, pointer and text only; other cursor types fall back to default.
+- Workbench configuration remains a tuning/export surface. Its accepted Soft disk preset is baked into the recorder; importing arbitrary feedback presets at recording time is not implemented.

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Adaptive recording cursors</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f5f4f0; color: #252b30; font-family: -apple-system, BlinkMacSystemFont, sans-serif; user-select: none; }
+  main { padding: 62px 70px; }
+  .eyebrow { font-size: 13px; font-weight: 650; letter-spacing: 2px; color: #69766e; text-transform: uppercase; }
+  h1 { font-size: 45px; font-weight: 600; letter-spacing: -1.6px; margin: 13px 0 12px; }
+  .intro { color: #69716b; font-size: 18px; margin-bottom: 36px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  article { background: #fff; border: 1px solid #dedfd8; border-radius: 18px; padding: 26px; height: 220px; }
+  .number { color: #969f98; font-size: 12px; letter-spacing: 1px; }
+  h2 { font-size: 23px; font-weight: 550; margin: 12px 0 9px; }
+  p { font-size: 15px; color: #69716b; line-height: 1.5; margin: 8px 0 20px; }
+  button { font: inherit; font-weight: 550; cursor: pointer; background: #246a51; color: white; border: 0; border-radius: 9px; padding: 13px 24px; }
+  button:hover { background: #1a543f; }
+  textarea { display: block; resize: none; width: 100%; height: 68px; border: 1px solid #c6cec8; border-radius: 9px; padding: 12px; font: 17px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; cursor: auto; outline-color: #246a51; }
+  #default { cursor: default; }
+  .lower { margin-top: 20px; display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+  .lower article { height: 184px; }
+  #auto { cursor: auto; user-select: text; }
+  #auto h2 { font-size: 20px; }
+  #auto-text { color: #252b30; font-size: 22px; line-height: 1.6; }
+  .chips { display: flex; gap: 12px; margin-top: 24px; }
+  .chip { padding: 15px 18px; border-radius: 9px; background: #edf0ec; font-size: 14px; }
+  #fallback { cursor: crosshair; }
+  #none { cursor: none; }
+  #drag-card { width: 180px; padding: 11px 16px; border: 1px solid #b8cabe; border-radius: 9px; background: #e8f1eb; color: #245c45; font-size: 15px; font-weight: 600; cursor: grab; touch-action: none; }
+  #drag-card.dragging { position: fixed; z-index: 10; box-shadow: 0 12px 25px #173b4526; pointer-events: none; }
+  body.dragging, body.dragging * { cursor: grabbing !important; }
+  #drop-zone { display: flex; align-items: center; justify-content: center; height: 47px; margin-top: 12px; border: 1px dashed #b6c8bc; border-radius: 9px; color: #69716b; font-size: 14px; }
+  #drop-zone.over { background: #dceddf; border-color: #246a51; }
+  #drop-zone.done { border-style: solid; border-color: #246a51; background: #e8f1eb; }
+  #drop-zone #drag-card { border: 0; padding: 0; text-align: center; cursor: default; }
+  #auto-text::selection { background: #b9d6fc; color: #172a43; }
+  footer { margin-top: 27px; display: flex; justify-content: space-between; font-size: 13px; color: #69716b; }
+  #live { color: #246a51; font-weight: 600; }
+</style>
+<main>
+  <div class="eyebrow">Agent-browser / Cursor themes</div>
+  <h1>A cursor that follows the interface.</h1>
+  <div class="intro">Your SVGs. The right shape. The same precise click point.</div>
+  <div class="grid">
+    <article id="default"><span class="number">01 / DEFAULT + DRAG</span><h2>The familiar arrow</h2><p>Pick up the card. Drop it in the target.</p><div id="drag-card">Drag this card</div></article>
+    <article><span class="number">02 / POINTER</span><h2>A hand for actions</h2><p>The page requests a pointer.</p><button id="action" onclick="this.textContent='Clicked precisely'">Try this button</button></article>
+    <article><span class="number">03 / TEXT</span><h2>An I-beam for writing</h2><p>Inferred from an editable field with auto.</p><textarea id="input" aria-label="Demo text" placeholder="Write something..."></textarea></article>
+  </div>
+  <div class="lower">
+    <article id="auto"><span class="number">AUTO / SMART TEXT DETECTION</span><h2>Text gets an I-beam. Empty space gets an arrow.</h2><span id="auto-text">Select these words, naturally.</span></article>
+    <article><span class="number">SAFE FALLBACKS + DROP</span><div class="chips"><div id="fallback" class="chip">Other → arrow</div><div id="none" class="chip">None → hidden</div></div><div id="drop-zone">Drop the card here</div></article>
+  </div>
+  <footer><span>Automatic switching · Per-icon hotspots · Native 60 fps recording</span><span id="live">CURSOR / DEFAULT</span></footer>
+</main>
+<script>
+  // Ordinary pointer-based drag/drop: recorded actions use real mouse input.
+  const card = document.querySelector('#drag-card');
+  const drop = document.querySelector('#drop-zone');
+  let drag = null;
+  function insideDrop(x, y) {
+    const r = drop.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
+  card.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || drop.dataset.completed === 'true') return;
+    event.preventDefault();
+    const rect = card.getBoundingClientRect();
+    drag = { x: event.clientX, y: event.clientY, rect, moved: false };
+    card.setPointerCapture(event.pointerId);
+  });
+  card.addEventListener('pointermove', event => {
+    if (!drag) return;
+    const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    const over = insideDrop(event.clientX, event.clientY);
+    drag.moved = true;
+    card.classList.add('dragging');
+    document.body.classList.add('dragging');
+    card.style.left = `${drag.rect.left}px`;
+    card.style.top = `${drag.rect.top}px`;
+    card.style.width = `${drag.rect.width}px`;
+    card.style.transform = `translate(${dx}px, ${dy}px)`;
+    drop.classList.toggle('over', over);
+  });
+  function finishDrag(event) {
+    if (!drag) return;
+    const accepted = event.type === 'pointerup' && drag.moved && insideDrop(event.clientX, event.clientY);
+    drag = null;
+    card.classList.remove('dragging');
+    document.body.classList.remove('dragging');
+    card.removeAttribute('style');
+    drop.classList.remove('over');
+    if (accepted) {
+      drop.replaceChildren(card);
+      drop.dataset.completed = 'true';
+      drop.classList.add('done');
+      card.textContent = 'Card delivered';
+    }
+  }
+  card.addEventListener('pointerup', finishDrag);
+  card.addEventListener('pointercancel', finishDrag);
+  document.addEventListener('selectionchange', () => {
+    const selection = getSelection();
+    if (selection.anchorNode && document.querySelector('#auto-text').contains(selection.anchorNode) && selection.toString()) {
+      window.demoSelectedText = selection.toString();
+    }
+  });
+  const observer = new MutationObserver(() => {
+    const type = document.querySelector('[data-agent-browser-recording-cursor]')?.dataset.cursorType || 'default';
+    const text = `CURSOR / ${type.toUpperCase()}`;
+    if (document.querySelector('#live').textContent !== text) document.querySelector('#live').textContent = text;
+  });
+  observer.observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-cursor-type'] });
+</script>
+</html>

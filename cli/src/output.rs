@@ -1740,8 +1740,8 @@ Options:
   --new-tab            Open link in a new tab instead of navigating current tab.
                        The new tab inherits session setup before its first load.
                        Only works on elements with an href attribute.
-  --human              Approach along a reproducible eased curve
-                       Starts at the last pointer or element interaction
+  --human              Approach fast, then slow into the target on a seeded curve
+                       Starts at the last pointer; briefly settles before clicking
 
 Global Options:
   --json               Output as JSON
@@ -2462,10 +2462,13 @@ Subcommands:
 Movement Options:
   --duration <ms>       Target total duration, including browser response time
   --steps <n>           Number of movement events (1-240)
-  --human               Use a reproducible eased curve
+  --human               Use a seeded curve: fast start, slow precise arrival
   --seed <n>            Seed for the human movement path
 
 Steps share one schedule; a slow browser can extend the requested duration.
+Human movement uses cubic ease-out for both forward travel and the bend.
+It covers 87.5% of forward distance in the first half of the planned duration.
+Smooth mode keeps symmetric easing. Target size does not affect timing.
 
 Global Options:
   --json               Output as JSON
@@ -2918,9 +2921,9 @@ The output file can be viewed in:
             r##"
 agent-browser record - Record browser session to video
 
-Usage: agent-browser record start <path.webm|path.mp4> [url] [--fps <n>] [--cursor] [--cursor-icon <path>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet]
+Usage: agent-browser record start <path.webm|path.mp4> [url] [--fps <n>] [--cursor] [--cursor-icon <path>|--cursor-theme <json>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet]
        agent-browser record stop
-       agent-browser record restart <path.webm|path.mp4> [url] [--fps <n>] [--cursor] [--cursor-icon <path>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet]
+       agent-browser record restart <path.webm|path.mp4> [url] [--fps <n>] [--cursor] [--cursor-icon <path>|--cursor-theme <json>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet]
 
 Record the browser to a video file. Supported formats are .webm (VP8 via
 libvpx) and .mp4 (H.264 via libx264); any other extension is handed to
@@ -2949,6 +2952,15 @@ crisp at recording size and do not depend on the OS cursor limit. Use
 measured in the SVG's unscaled viewBox. --cursor-scale enlarges both the icon
 and its hotspot. Any cursor-icon option enables the recording cursor.
 
+Use --cursor-theme theme.json to switch icons with CSS default/pointer/text.
+Cursor feedback is a filled disk behind the icon: expand on press, hold steady,
+then pulse larger and fade on release. No extra flags are required.
+The JSON requires a default entry; each entry has icon and hotspot: [x,y].
+Icon paths are relative to the theme file. --cursor-scale scales all entries.
+For auto, infer text over editable fields or selectable glyphs, otherwise use
+default. Unsupported styles use default; none hides the pointer. Theme mode
+is exclusive with --cursor-icon, --cursor-hotspot, and --cursor-size.
+
 Operations:
   start <path> [url]     Start recording the active page (navigates first if url given)
   stop                   Stop recording and save video
@@ -2958,6 +2970,7 @@ Options:
   --fps <n>                       Capture rate, 1-60 (default: 30)
   --cursor                        Show an animated pointer
   --cursor-icon <path>            Use a local SVG cursor icon
+  --cursor-theme <json>           Follow CSS using default/pointer/text icons
   --cursor-scale <factor>         Scale the SVG (above 0 through 16, default: 1)
   --cursor-hotspot <x,y>          Pointer tip in unscaled SVG coordinates (default: 0,0)
   --contact-sheet                 Save distinct visual changes as a timestamped PNG
@@ -2993,6 +3006,7 @@ Examples:
 
   # Make a large custom SVG cursor for a legible walkthrough
   agent-browser record start ./demo.webm --cursor-icon ./cursor.svg --cursor-scale 2 --cursor-hotspot 4,3
+  agent-browser record start ./demo.mp4 --cursor-theme ./theme.json --cursor-scale 0.5 --fps 60
 
   # Restart recording with a new file (stops previous, starts new)
   agent-browser record restart ./take2.webm

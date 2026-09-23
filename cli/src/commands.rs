@@ -1741,7 +1741,7 @@ fn parse_command_inner(args: &[String], flags: &Flags) -> Result<Value, ParseErr
                     "recording_start",
                     &rest[1..],
                     "record start",
-                    "record start <output.webm|output.mp4> [url] [--fps <n>] [--cursor] [--cursor-icon <path>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet] [--contact-sheet-threshold <0-1>]",
+                    "record start <output.webm|output.mp4> [url] [--fps <n>] [--cursor] [--cursor-icon <path>|--cursor-theme <json>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet] [--contact-sheet-threshold <0-1>]",
                 ),
                 Some("stop") => Ok(json!({ "id": id, "action": "recording_stop" })),
                 Some("restart") => parse_record_take(
@@ -1749,7 +1749,7 @@ fn parse_command_inner(args: &[String], flags: &Flags) -> Result<Value, ParseErr
                     "recording_restart",
                     &rest[1..],
                     "record restart",
-                    "record restart <output.webm|output.mp4> [url] [--fps <n>] [--cursor] [--cursor-icon <path>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet] [--contact-sheet-threshold <0-1>]",
+                    "record restart <output.webm|output.mp4> [url] [--fps <n>] [--cursor] [--cursor-icon <path>|--cursor-theme <json>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet] [--contact-sheet-threshold <0-1>]",
                 ),
                 Some(sub) => Err(ParseError::UnknownSubcommand {
                     subcommand: sub.to_string(),
@@ -2400,7 +2400,7 @@ fn parse_read(rest: &[&str], id: &str, flags: &Flags) -> Result<Value, ParseErro
 }
 
 /// Parse the arguments shared by `record start` and `record restart`:
-/// `<path> [url] [--fps <n>] [--cursor] [--cursor-icon <path>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet]` plus an optional
+/// `<path> [url] [--fps <n>] [--cursor] [--cursor-icon <path>|--cursor-theme <json>] [--cursor-scale <factor>] [--cursor-hotspot <x,y>] [--contact-sheet]` plus an optional
 /// contact-sheet pixel-difference threshold.
 ///
 /// `rest` excludes the subcommand. `path` needs an extension so ffmpeg can
@@ -2421,6 +2421,7 @@ fn parse_record_take(
     let mut fps: Option<u32> = None;
     let mut cursor = false;
     let mut cursor_image: Option<&str> = None;
+    let mut cursor_theme: Option<&str> = None;
     let mut cursor_scale: Option<f64> = None;
     let mut cursor_hotspot: Option<(f64, f64)> = None;
     let mut cursor_size: Option<u32> = None;
@@ -2465,6 +2466,18 @@ fn parse_record_take(
                         usage,
                     })?;
                 cursor_image = Some(value);
+                cursor = true;
+                i += 2;
+            }
+            "--cursor-theme" => {
+                cursor_theme =
+                    Some(
+                        rest.get(i + 1)
+                            .ok_or_else(|| ParseError::MissingArguments {
+                                context: format!("{} --cursor-theme", context),
+                                usage,
+                            })?,
+                    );
                 cursor = true;
                 i += 2;
             }
@@ -2607,6 +2620,14 @@ fn parse_record_take(
     }
     if let Some(image) = cursor_image {
         cmd["cursorIcon"] = json!(image);
+    }
+    if let Some(theme) = cursor_theme {
+        if cursor_image.is_some() || cursor_hotspot.is_some() || cursor_size.is_some() {
+            return Err(ParseError::InvalidValue {
+                message: "--cursor-theme cannot be combined with --cursor-icon, --cursor-hotspot, or --cursor-size".into(), usage,
+            });
+        }
+        cmd["cursorTheme"] = json!(theme);
     }
     if let Some(scale) = cursor_scale {
         cmd["cursorScale"] = json!(scale);

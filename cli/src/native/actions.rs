@@ -7823,6 +7823,15 @@ fn recording_options_from_command(cmd: &Value) -> Result<recording::RecordingOpt
     Ok(recording::RecordingOptions {
         fps: recording_fps_from_command(cmd)?,
         cursor: cmd.get("cursor").and_then(Value::as_bool).unwrap_or(false),
+        cursor_theme: match cmd.get("cursorTheme") {
+            None => None,
+            Some(value) => Some(
+                value
+                    .as_str()
+                    .ok_or("cursorTheme must be a local JSON path")?
+                    .to_string(),
+            ),
+        },
         cursor_image: cmd
             .get("cursorIcon")
             .or_else(|| cmd.get("cursorImage"))
@@ -13062,8 +13071,8 @@ async fn handle_inserttext(cmd: &Value, state: &DaemonState) -> Result<Value, St
 }
 
 /// Move the session cursor along a deterministic eased curve. Human mode adds
-/// a seeded perpendicular bend and samples the path frequently enough for
-/// animation-heavy pages while preserving exact, reproducible endpoints.
+/// a seeded perpendicular bend and cubic ease-out: cover distance quickly,
+/// then decelerate into the exact target. Smooth mode retains symmetric easing.
 /// Schedule steps against one clock so Chrome's response time counts toward
 /// the requested duration instead of being added to every step's delay.
 #[allow(clippy::too_many_arguments)]
@@ -13118,7 +13127,7 @@ async fn move_mouse_interpolated(
 
     for i in 1..=steps {
         let (x, y) = interpolated_mouse_point(
-            start_x, start_y, target_x, target_y, perp_x, perp_y, bend, i, steps,
+            start_x, start_y, target_x, target_y, perp_x, perp_y, bend, i, steps, human,
         );
         let params = build_mouse_event_params(
             mouse_state,
@@ -13186,13 +13195,22 @@ fn interpolated_mouse_point(
     bend: f64,
     step: usize,
     steps: usize,
+    human: bool,
 ) -> (f64, f64) {
     if step == steps {
         return (target_x, target_y);
     }
     let t = step as f64 / steps as f64;
-    let eased = t * t * (3.0 - 2.0 * t);
-    let curve = 4.0 * t * (1.0 - t) * bend;
+    let eased = if human {
+        1.0 - (1.0 - t).powi(3)
+    } else {
+        t * t * (3.0 - 2.0 * t)
+    };
+    // Parameterize the bend with the same progress as the forward movement.
+    // Otherwise sideways motion continues after forward motion has slowed,
+    // producing a last-second hook instead of a quiet arrival at the target.
+    let curve_progress = if human { eased } else { t };
+    let curve = 4.0 * curve_progress * (1.0 - curve_progress) * bend;
     (
         start_x + (target_x - start_x) * eased + perp_x * curve,
         start_y + (target_y - start_y) * eased + perp_y * curve,
@@ -15403,9 +15421,9 @@ printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"data":{}}'
 
     #[test]
     fn interpolated_mouse_path_uses_easing_and_exact_endpoint() {
-        let midpoint = interpolated_mouse_point(0.0, 0.0, 100.0, 0.0, 0.0, 1.0, 10.0, 1, 2);
+        let midpoint = interpolated_mouse_point(0.0, 0.0, 100.0, 0.0, 0.0, 1.0, 10.0, 1, 2, false);
         assert_eq!(midpoint, (50.0, 10.0));
-        let endpoint = interpolated_mouse_point(0.0, 0.0, 100.0, 0.0, 0.0, 1.0, 10.0, 2, 2);
+        let endpoint = interpolated_mouse_point(0.0, 0.0, 100.0, 0.0, 0.0, 1.0, 10.0, 2, 2, false);
         assert_eq!(endpoint, (100.0, 0.0));
     }
 
@@ -15414,6 +15432,54 @@ printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"data":{}}'
         assert_eq!(interpolated_mouse_steps(10.0, 260, None, true), 33);
         assert_eq!(interpolated_mouse_steps(10.0, 260, None, false), 1);
         assert_eq!(interpolated_mouse_steps(10.0, 100, Some(3), true), 3);
+    }
+
+    #[test]
+    fn human_mouse_path_starts_fast_and_decelerates_to_exact_target() {
+        for (x, y) in [(10.0_f64, 0.0_f64), (800.0, 300.0), (-800.0, -300.0)] {
+            let distance = x.hypot(y);
+            for bend_sign in [-1.0, 0.0, 1.0] {
+                let bend = bend_sign * (distance * 0.08).min(36.0);
+                let point = |step, steps| {
+                    interpolated_mouse_point(
+                        0.0,
+                        0.0,
+                        x,
+                        y,
+                        -y / distance,
+                        x / distance,
+                        bend,
+                        step,
+                        steps,
+                        true,
+                    )
+                };
+                assert_eq!(point(0, 120), (0.0, 0.0));
+                assert_eq!(point(120, 120), (x, y));
+                let halfway = point(60, 120);
+                let forward_progress = (halfway.0 * x + halfway.1 * y) / distance.powi(2);
+                assert!((forward_progress - 0.875).abs() < 1e-12);
+                // Both perpendicular and forward travel slow down, even on a
+                // short or leftward curved path. No late lateral hook.
+                let mut previous = point(0, 120);
+                let mut previous_speed = f64::INFINITY;
+                for step in 1..=120 {
+                    let current = point(step, 120);
+                    let speed = (current.0 - previous.0).hypot(current.1 - previous.1);
+                    assert!(
+                        speed <= previous_speed + 1e-10,
+                        "speed increased at step {step}"
+                    );
+                    previous = current;
+                    previous_speed = speed;
+                }
+                assert_eq!(
+                    point(30, 60),
+                    halfway,
+                    "curve should not depend on sample count"
+                );
+            }
+        }
     }
 
     #[test]

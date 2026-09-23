@@ -1,0 +1,5 @@
+{
+  "default": { "icon": "left_ptr.svg", "hotspot": [59, 28] },
+  "pointer": { "icon": "hand2.svg", "hotspot": [67, 30] },
+  "text": { "icon": "xterm.svg", "hotspot": [100, 104] }
+}

@@ -43,7 +43,7 @@ agent-browser record start ./demo.webm
 
 ## Visible cursor
 
-Chrome recordings do not normally include the native pointer. Add `--cursor` for an animated pointer and click ripple rendered with the page, keeping drags synchronized in every captured frame. A device-pixel-ratio-aware canvas keeps the capture damage region stable after drags, avoiding Chromium's cursor-only capture stalls. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it. The requested FPS is an output target; encoded FPS metadata does not guarantee that Chrome supplied that many distinct frames:
+Chrome recordings do not normally include the native pointer. Add `--cursor` for an animated pointer and a filled translucent disk behind it. Press expands the disk from 16 to 30 CSS-pixel radius over 90 ms; holding keeps it steady at 20% opacity; release pulses to 48 px and fades over 200 ms. Quick clicks release smoothly from the unfinished press animation. The overlay renders with the page, keeping drags synchronized in every captured frame. A device-pixel-ratio-aware canvas keeps the capture damage region stable after drags, avoiding Chromium's cursor-only capture stalls. The temporary overlay is inert, hidden from accessibility snapshots, and removed when recording stops. Screenshots taken during the recording include it. The requested FPS is an output target; encoded FPS metadata does not guarantee that Chrome supplied that many distinct frames:
 
 ```bash
 agent-browser record start ./walkthrough.webm --cursor
@@ -56,6 +56,22 @@ agent-browser record start ./walkthrough.webm --cursor-icon ./large-arrow.svg --
 ```
 
 ## Repeatable product demos
+
+### Adaptive cursor themes
+
+Use `--cursor-theme ./theme.json --cursor-scale 0.5` instead of `--cursor-icon` to follow the page's CSS cursor automatically:
+
+```json
+{
+  "default": { "icon": "left_ptr.svg", "hotspot": [59, 28] },
+  "pointer": { "icon": "hand2.svg", "hotspot": [67, 30] },
+  "text": { "icon": "xterm.svg", "hotspot": [100, 104] }
+}
+```
+
+The default entry is required; pointer and text are optional. Each icon path is relative to the theme file, each hotspot is in that icon's unscaled coordinates, and the shared scale applies to both. These coordinates match the example assets, not arbitrary icons. Theme mode implies a visible recording cursor and is exclusive with the single-icon/hotspot/size flags.
+
+Explicit CSS default/pointer/text is respected. For auto, text inputs, editable areas, and directly hit selectable text use the I-beam; empty padding stays an arrow. Unsupported types fall back to default; none hides the pointer. CSS URL cursors use their final keyword fallback. Native widget internals and closed shadow trees cannot be perfectly inferred from page styles. Stationary style changes are also detected, with no continuous idle repaint.
 
 Use an agent to discover and rehearse the UI, then run the take as one deterministic `batch --bail` script. Start capture only after the actual controls are ready; keep authentication, loading, screenshots, and assertions outside the take. Short target and menu settling delays make actions readable without multi-second gaps between commands.
 
