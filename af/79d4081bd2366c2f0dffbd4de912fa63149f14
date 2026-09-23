@@ -1,0 +1,135 @@
+cli/src/native/recording.rs
+  s_408157d782cb56::t_08fd94c1f8ba10 291,314,321-323,375,379-394,399-409,414-427,444,990-991,1008,1070,1100
+  s_408157d782cb56::t_40448659bc5f12 395-398,410-413,2089-2090,3000-3044
+  s_408157d782cb56::t_a0d1f55b9f964c 3045-3046
+examples/recordings/cursor-theme-demo.html
+  s_408157d782cb56::t_611da7f9efbf42 30-37,46,52,57-108
+  s_408157d782cb56::t_fbd35e4207db18 1-29,38-45,47-51,53-56,109-116
+examples/recordings/cursor-workbench/app.mjs
+  s_408157d782cb56::t_f682a4c8235c37 22,24,56,105-108,206,214-215
+  s_408157d782cb56::t_bcbcbcb53c1a3b 21,23,25,100-102,104,185-186,196,203,232
+  s_408157d782cb56::t_0c218fdfb4a3f2 1-20,26-55,57,59-99,103,109-184,187-195,197-202,204-205,207-213,216-231,233-236
+  s_408157d782cb56::t_e7d387ab378d34 58
+test/recording-cursor-feedback.test.mjs
+  s_408157d782cb56::t_8fa86bbc8b7671 1-63
+examples/recordings/cursor-workbench/model.test.mjs
+  s_408157d782cb56::t_f06b7161dce1bc 50-54
+  s_408157d782cb56::t_92a22745c1ee36 1-8,10-39,55-66
+  s_408157d782cb56::t_b3fb769ce6c6b6 9
+  s_408157d782cb56::t_bcbcbcb53c1a3b 40-49
+examples/recordings/cursor-theme-demo.mjs
+  s_408157d782cb56::t_611da7f9efbf42 37-44,47,49,78-82
+  s_408157d782cb56::t_fbd35e4207db18 1-35,45-46,48,50-77,83-88
+  s_408157d782cb56::t_3ffb28c1f03355 36
+docs/src/app/recording/page.mdx
+  s_408157d782cb56::t_d49bd637ce3fc7 46
+  s_408157d782cb56::t_4af02f20d35bdd 60-75
+cli/src/commands.rs
+  s_408157d782cb56::t_08fd94c1f8ba10 2424,2472,2481-2483,2624-2630
+  s_408157d782cb56::t_a13d866a578545 1744,1752,2403,2473-2480
+  s_408157d782cb56::t_900884c01f4899 2631
+examples/recordings/cursor-workbench/.npmrc
+  s_408157d782cb56::t_83cf0bd08730c5 1
+examples/recordings/cursor-workbench/package.json
+  s_408157d782cb56::t_83cf0bd08730c5 1-11
+cli/src/native/actions.rs
+  s_408157d782cb56::t_08fd94c1f8ba10 7826-7827,7834
+  s_408157d782cb56::t_702fbcb45db10a 7828-7833,13074-13075,13130,13198,13204-13213,15424,15426,15437-15462,15465
+  s_408157d782cb56::t_7e135671c4f3b3 15463-15464,15466-15484
+cli/src/mcp.rs
+  s_408157d782cb56::t_08fd94c1f8ba10 3193-3196,4254
+  s_408157d782cb56::t_12a34fdd92037a 858,992,1124,1400,1433,4233-4252
+  s_408157d782cb56::t_d49bd637ce3fc7 1398,1431
+  s_408157d782cb56::t_188f6ddec0893d 4253,4255
+skill-data/core/references/video-recording.md
+  s_408157d782cb56::t_4af02f20d35bdd 192-207
+  s_408157d782cb56::t_d49bd637ce3fc7 95
+examples/recordings/cursor-workbench/build.mjs
+  s_408157d782cb56::t_83cf0bd08730c5 2-9,13-15,17,32
+  s_408157d782cb56::t_13930541dd6c60 25,28,31
+  s_408157d782cb56::t_92a22745c1ee36 1,10-12,16,18-24,26-27,29-30
+cli/src/native/recording-cursor.js
+  s_408157d782cb56::t_6dfb834fa75c23 6-9,20-44,135,163-167,169-170,172,187,207-209,232-238
+  s_408157d782cb56::t_4e16420673256d 10-11,45-97,116,128-130,147,181,217-228,246,249-253,258-259
+cli/src/output.rs
+  s_408157d782cb56::t_4af02f20d35bdd 2955,2958-2963,2973,3009
+  s_408157d782cb56::t_12a34fdd92037a 1743-1744,2465,2469-2471
+  s_408157d782cb56::t_a13d866a578545 2924,2926
+  s_408157d782cb56::t_d49bd637ce3fc7 2956-2957
+examples/recordings/cursor-workbench/index.html
+  s_408157d782cb56::t_f682a4c8235c37 22
+  s_408157d782cb56::t_732a6c136d998d 1-15,17-21,23-25,27-34
+  s_408157d782cb56::t_e7d387ab378d34 16,26
+examples/recordings/cursor-workbench/reference.mjs
+  s_408157d782cb56::t_bcbcbcb53c1a3b 51
+  s_408157d782cb56::t_92a22745c1ee36 1-30,32-43,45-49,52-53
+  s_408157d782cb56::t_e7d387ab378d34 31,44
+  s_408157d782cb56::t_f682a4c8235c37 50
+README.md
+  s_408157d782cb56::t_12a34fdd92037a 324
+  s_408157d782cb56::t_d49bd637ce3fc7 471
+  s_408157d782cb56::t_4af02f20d35bdd 477-478
+examples/recordings/README.md
+  s_408157d782cb56::t_12a34fdd92037a 87
+  s_408157d782cb56::t_4af02f20d35bdd 60-72,75-78
+  s_408157d782cb56::t_d49bd637ce3fc7 81,95
+  s_408157d782cb56::t_87f30aab25851a 73-74
+  s_408157d782cb56::t_b3fb769ce6c6b6 82
+  s_ed30d87439a750::t_977b5e1c1334f1 116-121
+skill-data/core/references/commands.md
+  s_408157d782cb56::t_12a34fdd92037a 167
+examples/recordings/cursor-theme.example.json
+  s_408157d782cb56::t_4af02f20d35bdd 1-5
+examples/recordings/cursor-workbench/style.css
+  s_408157d782cb56::t_732a6c136d998d 1-4
+docs/src/app/commands/page.mdx
+  s_408157d782cb56::t_12a34fdd92037a 167
+examples/recordings/cursor-workbench/README.md
+  s_408157d782cb56::t_13930541dd6c60 13
+  s_408157d782cb56::t_bcbcbcb53c1a3b 23
+  s_408157d782cb56::t_f682a4c8235c37 25-26
+  s_408157d782cb56::t_e7d387ab378d34 35
+  s_408157d782cb56::t_b3fb769ce6c6b6 1-12,14-22,24,27-34,36-37
+skill-data/core/SKILL.md
+  s_408157d782cb56::t_d49bd637ce3fc7 389
+  s_408157d782cb56::t_12a34fdd92037a 145,161
+examples/recordings/cursor-workbench/model.mjs
+  s_408157d782cb56::t_f06b7161dce1bc 53,56-57,90
+  s_408157d782cb56::t_83cf0bd08730c5 1-5,10-19,21-52,54-55,58-75,78-89,91-125,127-137
+  s_408157d782cb56::t_b3fb769ce6c6b6 20,126
+  s_408157d782cb56::t_f682a4c8235c37 7,9
+  s_408157d782cb56::t_bcbcbcb53c1a3b 6,8,76-77
+examples/recordings/cursor-workbench/browser-check.mjs
+  s_408157d782cb56::t_32d4456dcd3d53 25-30,42
+  s_408157d782cb56::t_bcbcbcb53c1a3b 20,31
+  s_408157d782cb56::t_13930541dd6c60 23,32
+  s_408157d782cb56::t_4d008b0a092664 1-19,21-22,24,33-41,43
+.github/workflows/ci.yml
+  s_ed30d87439a750::t_a4ce4e7437e239 44-45
+examples/recordings/cursor-workbench/pnpm-lock.yaml
+  s_408157d782cb56::t_15fa84439700af 1-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "af79d4081bd2366c2f0dffbd4de912fa63149f14",
+  "prompts": {},
+  "sessions": {
+    "s_408157d782cb56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c0d0-c86b-7383-9571-52c6e63302a7",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Francois Laberge <francoislaberge@gmail.com>"
+    },
+    "s_ed30d87439a750": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0cec0-0203-7311-892b-3ab6343aeb31",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Francois Laberge <francoislaberge@gmail.com>"
+    }
+  }
+}
